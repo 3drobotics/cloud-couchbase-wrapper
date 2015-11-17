@@ -91,6 +91,15 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     }
   }
 
+  private def convertToString(docObservable: Observable[RawJsonDocument]): Future[DocumentResponse[String]] = {
+    val docPublisher = RxReactiveStreams.toPublisher(docObservable)
+    val rawDocFuture = Source(docPublisher).runWith(Sink.head)
+    rawDocFuture.map { rawString =>
+      val entity = rawString.content()
+      DocumentResponse(cas = rawString.cas(), entity = entity)
+    }
+  }
+
   /**
    * Using spray-json, convert the found document into an entity of type T
    * @param jsonDocument The document retrieved
@@ -123,18 +132,23 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * Marshall entity to json, insert it into the database, then unmarshal the response and return it
    * @param entity The object to insert
    * @param key The location to insert it to
+   * @param expiry optional expiry time in seconds, 0 (stored indefinitely) if not set
    * @tparam T The type of the object
    * @return The resulting document after it has been inserted
    */
-  def insertDocument[T](entity: T, key: String)
+  def insertDocument[T](entity: T, key: String, expiry: Int = 0)
                        (implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
     val jsonString = marshalEntity[T](entity)
-
-//    marshalEntity[T](entity).flatMap {jsonString =>
-    val doc = RawJsonDocument.create(key, jsonString)
+    val doc = RawJsonDocument.create(key, expiry, jsonString)
     val insertObservable = bucket.async().insert(doc)
     convertToEntity[T](insertObservable)
-//    }
+  }
+
+  def insertRawString(data: String, key: String, expiry: Int = 0)
+                      : Future[DocumentResponse[String]] = {
+    val doc = RawJsonDocument.create(key, expiry, data)
+    val insertObservable = bucket.async().insert(doc)
+    convertToString(insertObservable)
   }
 
   /**
@@ -146,6 +160,11 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   def lookupByKey[T](key: String)(implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
     val docObservable = bucket.async().get(key, classOf[RawJsonDocument])
     convertToEntity[T](docObservable)
+  }
+
+  def lookupStringByKey(key: String): Future[DocumentResponse[String]] = {
+    val docObservable = bucket.async().get(key, classOf[RawJsonDocument])
+    convertToString(docObservable)
   }
 
   /**
