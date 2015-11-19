@@ -91,15 +91,6 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     }
   }
 
-  private def convertToString(docObservable: Observable[RawJsonDocument]): Future[DocumentResponse[String]] = {
-    val docPublisher = RxReactiveStreams.toPublisher(docObservable)
-    val rawDocFuture = Source(docPublisher).runWith(Sink.head)
-    rawDocFuture.map { rawString =>
-      val entity = rawString.content()
-      DocumentResponse(cas = rawString.cas(), entity = entity)
-    }
-  }
-
   /**
    * Using spray-json, convert the found document into an entity of type T
    * @param jsonDocument The document retrieved
@@ -144,13 +135,6 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     convertToEntity[T](insertObservable)
   }
 
-  def insertRawString(data: String, key: String, expiry: Int = 0)
-                      : Future[DocumentResponse[String]] = {
-    val doc = RawJsonDocument.create(key, expiry, data)
-    val insertObservable = bucket.async().insert(doc)
-    convertToString(insertObservable)
-  }
-
   /**
    * Lookup a document in couchbase by the key, and unmarshal it into an object: T
    * @param key The key to lookup in the database
@@ -160,11 +144,6 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   def lookupByKey[T](key: String)(implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
     val docObservable = bucket.async().get(key, classOf[RawJsonDocument])
     convertToEntity[T](docObservable)
-  }
-
-  def lookupStringByKey(key: String): Future[DocumentResponse[String]] = {
-    val docObservable = bucket.async().get(key, classOf[RawJsonDocument])
-    convertToString(docObservable)
   }
 
   /**
