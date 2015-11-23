@@ -124,13 +124,14 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * Marshall entity to json, insert it into the database, then unmarshal the response and return it
    * @param entity The object to insert
    * @param key The location to insert it to
+   * @param expiry optional expiry time in seconds, 0 (stored indefinitely) if not set
    * @tparam T The type of the object
    * @return The resulting document after it has been inserted
    */
-  def insertDocument[T](entity: T, key: String)
+  def insertDocument[T](entity: T, key: String, expiry: Int = 0)
                        (implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
     val jsonString = marshalEntity[T](entity)
-    val doc = RawJsonDocument.create(key, jsonString)
+    val doc = RawJsonDocument.create(key, expiry, jsonString)
     val insertObservable = bucket.async().insert(doc)
     convertToEntity[T](insertObservable)
   }
