@@ -30,6 +30,7 @@ import scala.util.{Failure, Success}
  */
 
 case class DocumentResponse[T](cas: Long, entity: T)
+class DocumentNotFound(message: String) extends RuntimeException(message)
 
 object CouchbaseStreamsWrapper {
   // Keep the env in an object so it is only created once
@@ -129,12 +130,9 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   def insertDocument[T](entity: T, key: String)
                        (implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
     val jsonString = marshalEntity[T](entity)
-
-//    marshalEntity[T](entity).flatMap {jsonString =>
     val doc = RawJsonDocument.create(key, jsonString)
     val insertObservable = bucket.async().insert(doc)
     convertToEntity[T](insertObservable)
-//    }
   }
 
   /**
@@ -170,7 +168,10 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   def removeByKey(key: String): Future[JsonDocument] = {
     val removedObservable = bucket.async().remove(key)
     val publisher = RxReactiveStreams.toPublisher(removedObservable)
-    Source(publisher).runWith(Sink.head)
+    val docFuture = Source(publisher).runWith(Sink.head)
+    docFuture.recover{
+      case ex: NoSuchElementException => throw new DocumentNotFound(s"Could not locate $key in $bucket")
+    }
   }
 
   /**
