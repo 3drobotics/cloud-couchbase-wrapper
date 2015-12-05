@@ -2,12 +2,13 @@ import java.util.UUID
 
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.Sink
+import akka.stream.scaladsl.{Source, Sink}
+import akka.util.ByteString
 import com.couchbase.client.java.bucket.BucketFlusher
 import com.couchbase.client.java.error.{CASMismatchException, DocumentDoesNotExistException}
 import com.couchbase.client.java.view.{DefaultView, DesignDocument, Stale}
 import com.typesafe.config.ConfigFactory
-import io.dronekit.CouchbaseStreamsWrapper
+import io.dronekit.{DocumentNotFound, CouchbaseStreamsWrapper}
 import org.scalatest._
 import spray.json.DefaultJsonProtocol
 
@@ -16,6 +17,7 @@ import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext}
 import scala.language.postfixOps
 import scala.languageFeature.postfixOps
+import scala.util.Random
 
 
 /**
@@ -79,8 +81,8 @@ class IntegrationTest extends WordSpec with Matchers {
   }
 
   "Should throw an exception if retrieving a non-existing document" in {
-    intercept[NoSuchElementException] {
-      Await.result(couchbase.lookupByKey("Unicorn"), 10 seconds) shouldBe None
+    intercept[DocumentNotFound] {
+      Await.result(couchbase.lookupByKey("Unicorn"), 1 seconds) shouldBe None
     }
   }
 
@@ -184,7 +186,16 @@ class IntegrationTest extends WordSpec with Matchers {
     val results = Await.result(source.grouped(2).runWith(Sink.head), 10 seconds)
     results.find(_.entity.id == personOne.id).get.entity shouldBe personOne
     results.find(_.entity.id == personTwo.id).get.entity shouldBe personTwo
+  }
 
+  "Should be able to insert and retrieve binary documents" in {
+    val data = ByteString(Random.alphanumeric.take(100).map(_.toByte).toArray[Byte])
+    val insertFuture = couchbase.binaryInsertDocument(data, "binaryDoc1")
+    val result = Await.result(insertFuture, 1 second)
+    assert(result.cas > 0)
+    val readFuture = couchbase.binaryLookupByKey("binaryDoc1")
+    val readResult = Await.result(readFuture, 1 second)
+    readResult.entity shouldBe data
   }
 
 

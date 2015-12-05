@@ -4,13 +4,17 @@ package io.dronekit
  * Created by Jason Martens <jason.martens@3drobotics.com> on 9/16/15.
  *
  */
+
 import java.util.NoSuchElementException
 
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{Sink, Source}
+import akka.stream.scaladsl.Source
+import akka.util.ByteString
+import com.couchbase.client.deps.io.netty.buffer._
+import com.couchbase.client.deps.io.netty.util.ReferenceCountUtil
 import com.couchbase.client.java.CouchbaseCluster
 import com.couchbase.client.java.document.json.JsonArray
-import com.couchbase.client.java.document.{JsonDocument, RawJsonDocument}
+import com.couchbase.client.java.document.{BinaryDocument, JsonDocument, RawJsonDocument}
 import com.couchbase.client.java.env.DefaultCouchbaseEnvironment
 import com.couchbase.client.java.view.{AsyncViewRow, Stale, ViewQuery}
 import rx.RxReactiveStreams
@@ -51,7 +55,14 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @return The future
    */
   def observableToFuture[T](observable: Observable[T]): Future[T] = {
-    Source(RxReactiveStreams.toPublisher(observable)).runWith(Sink.head)
+    val p = Promise[T]
+    toScalaObservable(observable).subscribe(
+      value => p.trySuccess(value),
+      e => p.tryFailure(e),
+      () => p.tryFailure(new RuntimeException("No content"))
+    )
+//    Source(RxReactiveStreams.toPublisher(observable)).runWith(Sink.head)
+    p.future
   }
 
   /**
@@ -84,12 +95,19 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    */
   private def convertToEntity[T](docObservable: Observable[RawJsonDocument])
                                 (implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
-    val docPublisher = RxReactiveStreams.toPublisher(docObservable)
-    val rawDocFuture = Source(docPublisher).runWith(Sink.head)
-    rawDocFuture.map { rawJsonDoc =>
-      val entity = rawJsonDoc.content().parseJson.convertTo[T]
-      DocumentResponse(cas = rawJsonDoc.cas(), entity = entity)
-    }
+    val p = Promise[DocumentResponse[T]]
+    toScalaObservable(docObservable).subscribe(
+      doc => p.trySuccess(DocumentResponse(cas = doc.cas(), entity = doc.content().parseJson.convertTo[T])),
+      e => p.tryFailure(e),
+      () => p.tryFailure(new DocumentNotFound(""))
+    )
+//    val docPublisher = RxReactiveStreams.toPublisher(docObservable)
+//    val rawDocFuture = Source(docPublisher).runWith(Sink.head)
+//    rawDocFuture.map { rawJsonDoc =>
+//      val entity = rawJsonDoc.content().parseJson.convertTo[T]
+//      DocumentResponse(cas = rawJsonDoc.cas(), entity = entity)
+//    }
+    p.future
   }
 
   /**
@@ -147,6 +165,32 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     convertToEntity[T](docObservable)
   }
 
+  def binaryLookupByKey(key: String): Future[DocumentResponse[ByteString]] = {
+    val p = Promise[DocumentResponse[ByteString]]()
+    val docObservable = bucket.async().get(key, classOf[BinaryDocument])
+    toScalaObservable(docObservable).subscribe(
+      doc => {
+        p.trySuccess(DocumentResponse(cas = doc.cas(), entity = ByteString(doc.content().nioBuffer())))
+        ReferenceCountUtil.release(doc.content())
+      },
+      e => p.tryFailure(e),
+      () => p.tryFailure(new DocumentNotFound(""))
+    )
+    p.future
+  }
+
+  def binaryInsertDocument(data: ByteString, key: String, expiry: Int = 0): Future[DocumentResponse[ByteString]] = {
+    val p = Promise[DocumentResponse[ByteString]]()
+    val buffer = Unpooled.copiedBuffer(data.toArray[Byte])
+    val doc = BinaryDocument.create(key, expiry, buffer)
+    val insertObservable = toScalaObservable(bucket.async().insert(doc))
+    insertObservable.subscribe(
+      doc => p.success(DocumentResponse(cas = doc.cas(), entity = ByteString())),
+      e => p.failure(e)
+    )
+    p.future
+  }
+
   /**
    * Retrieve a list of keys in Couchbase using the batch async system
    * @param keys The list of keys to retrieve
@@ -167,12 +211,14 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @return A Successful future if the document was found, otherwise a Failure
    */
   def removeByKey(key: String): Future[JsonDocument] = {
+    val p = Promise[JsonDocument]()
     val removedObservable = bucket.async().remove(key)
-    val publisher = RxReactiveStreams.toPublisher(removedObservable)
-    val docFuture = Source(publisher).runWith(Sink.head)
-    docFuture.recover{
-      case ex: NoSuchElementException => throw new DocumentNotFound(s"Could not locate $key in $bucket")
-    }
+    toScalaObservable(removedObservable).subscribe(
+      doc => p.trySuccess(doc),
+      e => p.tryFailure(e),
+      () => p.tryFailure(new DocumentNotFound(""))
+    )
+    p.future
   }
 
   /**

@@ -2,7 +2,7 @@ name := "couchbasestreamswrapper"
 
 organization := "io.dronekit"
 
-version := "2.0.1-M2"
+version := "2.1.0-M2"
 
 scalaVersion := "2.11.7"
 
@@ -31,7 +31,7 @@ libraryDependencies ++= {
     "org.scalatest" %% "scalatest" % scalaTestV % "test",
     "ch.qos.logback" % "logback-classic" % "1.1.3",
     "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0",
-    "com.couchbase.client" % "java-client" % "2.2.0",
+    "com.couchbase.client" % "java-client" % "2.2.2",
     "io.reactivex" % "rxjava-reactive-streams" % "1.0.1",
     "io.reactivex" %% "rxscala" % "0.25.0"
   )
