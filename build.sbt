@@ -2,7 +2,7 @@ name := "couchbasestreamswrapper"
 
 organization := "io.dronekit"
 
-version := "2.1.0-M2"
+version := "2.1.1-M2"
 
 scalaVersion := "2.11.7"
 

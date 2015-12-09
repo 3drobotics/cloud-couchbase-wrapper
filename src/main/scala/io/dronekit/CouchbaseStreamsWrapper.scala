@@ -61,7 +61,6 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
       e => p.tryFailure(e),
       () => p.tryFailure(new RuntimeException("No content"))
     )
-//    Source(RxReactiveStreams.toPublisher(observable)).runWith(Sink.head)
     p.future
   }
 
@@ -101,12 +100,6 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
       e => p.tryFailure(e),
       () => p.tryFailure(new DocumentNotFound(""))
     )
-//    val docPublisher = RxReactiveStreams.toPublisher(docObservable)
-//    val rawDocFuture = Source(docPublisher).runWith(Sink.head)
-//    rawDocFuture.map { rawJsonDoc =>
-//      val entity = rawJsonDoc.content().parseJson.convertTo[T]
-//      DocumentResponse(cas = rawJsonDoc.cas(), entity = entity)
-//    }
     p.future
   }
 
@@ -265,13 +258,24 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @param stale Allow potentially stale indexes or not
    * @return Observable of AsyncViewRow
    */
-  def indexQuery(designDoc: String, viewDoc: String, keys: List[String] = List(), stale: Stale = Stale.FALSE):
-  Observable[AsyncViewRow] = {
+  def indexQuery(designDoc: String, viewDoc: String, keys: List[String] = List(), stale: Stale = Stale.FALSE,
+                limit: Int = Int.MaxValue, skip: Int = 0): Observable[AsyncViewRow] = {
     // Couchbase needs a java.util.List
     val keyList: java.util.List[String] = keys
     val query =
-      if (keys.isEmpty) ViewQuery.from(designDoc, viewDoc).stale(stale).inclusiveEnd(true)
-      else ViewQuery.from(designDoc, viewDoc).stale(stale).inclusiveEnd(true).keys(JsonArray.from(keyList))
+      if (keys.isEmpty)
+        ViewQuery.from(designDoc, viewDoc)
+          .stale(stale)
+          .inclusiveEnd(true)
+          .limit(limit)
+          .skip(skip)
+      else
+        ViewQuery.from(designDoc, viewDoc)
+          .stale(stale)
+          .inclusiveEnd(true)
+          .keys(JsonArray.from(keyList))
+          .limit(limit)
+          .skip(skip)
     toScalaObservable(bucket.async().query(query))
       .flatMap(queryResult => queryResult.rows())
   }
@@ -284,11 +288,17 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @param stale Allow stale records
    * @return Observable of AsyncViewRows
    */
-  def compoundIndexQuery(designDoc: String, viewDoc: String, keys: List[List[Any]], stale: Stale = Stale.FALSE):
-  Observable[AsyncViewRow] = {
+  def compoundIndexQuery(designDoc: String, viewDoc: String, keys: List[List[Any]], stale: Stale = Stale.FALSE,
+                         limit: Int = Int.MaxValue, skip: Int = 0): Observable[AsyncViewRow] = {
     // Couchbase needs a java.util.List
     val keyList: java.util.List[java.util.List[Any]] = keys.map(seqAsJavaList)
-    val query = ViewQuery.from(designDoc, viewDoc).stale(stale).inclusiveEnd(true).keys(JsonArray.from(keyList))
+    val query = ViewQuery
+      .from(designDoc, viewDoc)
+      .stale(stale)
+      .inclusiveEnd(true)
+      .keys(JsonArray.from(keyList))
+      .limit(limit)
+      .skip(skip)
     toScalaObservable(bucket.async().query(query))
       .flatMap(queryResult => queryResult.rows())
   }
@@ -312,9 +322,10 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @tparam T The entity type to unmarshal to
    * @return A Source[T, Any] of the found documents.
    */
-  def indexQueryToEntity[T](designDoc: String, viewDoc: String, keys: List[String] = List(), stale: Stale = Stale.FALSE)
+  def indexQueryToEntity[T](designDoc: String, viewDoc: String, keys: List[String] = List(), stale: Stale = Stale.FALSE,
+                           limit: Int = Int.MaxValue, skip: Int = 0)
                            (implicit format: JsonFormat[T]): Source[DocumentResponse[T], Any] = {
-    val query = indexQuery(designDoc, viewDoc, keys, stale)
+    val query = indexQuery(designDoc, viewDoc, keys, stale, limit, skip)
     val docs = withDocuments(query)
     Source(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
   }
@@ -328,10 +339,11 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @tparam T The type of the entity to unmarshal to
    * @return A Source[T, Any] of the found documents.
    */
-  def compoundIndexQueryToEntity[T](designDoc: String, viewDoc: String, keys: List[List[Any]], stale: Stale = Stale.FALSE)
+  def compoundIndexQueryToEntity[T](designDoc: String, viewDoc: String, keys: List[List[Any]],
+                                    stale: Stale = Stale.FALSE, limit: Int = Int.MaxValue, skip: Int = 0)
                                    (implicit format: JsonFormat[T]):
   Source[DocumentResponse[T], Any] = {
-    val query = compoundIndexQuery(designDoc, viewDoc, keys, stale)
+    val query = compoundIndexQuery(designDoc, viewDoc, keys, stale, limit, skip)
     val docs = withDocuments(query)
     Source(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
   }
