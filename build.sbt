@@ -2,7 +2,7 @@ name := "couchbasestreamswrapper"
 
 organization := "io.dronekit"
 
-version := "2.1.1-M2"
+version := "2.1.2"
 
 scalaVersion := "2.11.7"
 
@@ -23,7 +23,7 @@ publishTo := {
 }
 
 libraryDependencies ++= {
-  val akkaStreamV = "2.0-M2"
+  val akkaStreamV = "2.0.1"
   val scalaTestV = "2.2.4"
   Seq(
     "com.typesafe.akka" %% "akka-stream-experimental" % akkaStreamV,

@@ -71,7 +71,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @return An Akka-Streams Source
    */
   def observableToSource[T](observable: rx.lang.scala.Observable[T]): Source[T, Any] = {
-    Source(RxReactiveStreams.toPublisher(observable))
+    Source.fromPublisher(RxReactiveStreams.toPublisher(observable))
   }
 
   /**
@@ -327,7 +327,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
                            (implicit format: JsonFormat[T]): Source[DocumentResponse[T], Any] = {
     val query = indexQuery(designDoc, viewDoc, keys, stale, limit, skip)
     val docs = withDocuments(query)
-    Source(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
+    Source.fromPublisher(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
   }
 
   /**
@@ -345,7 +345,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   Source[DocumentResponse[T], Any] = {
     val query = compoundIndexQuery(designDoc, viewDoc, keys, stale, limit, skip)
     val docs = withDocuments(query)
-    Source(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
+    Source.fromPublisher(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
   }
 
 }
