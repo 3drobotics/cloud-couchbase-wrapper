@@ -423,6 +423,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   def paginatedIndexQuery[T](designDoc: String, viewDoc: String, startKey: Seq[Any], endKey: Seq[Any],
                           startDocId: Option[String] = None, stale: Stale = Stale.FALSE, limit: Int = 100)
                          (implicit format: JsonFormat[T]): Future[ViewQueryResponse[T]] = {
+    if (startKey.length != endKey.length) throw new IllegalArgumentException("startKey and endKey must be the same length")
     val query = ViewQuery
       .from(designDoc, viewDoc)
       .stale(stale)
