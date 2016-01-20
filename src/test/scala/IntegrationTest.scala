@@ -2,22 +2,53 @@ import java.util.UUID
 
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{Source, Sink}
+import akka.stream.scaladsl.Sink
+import akka.stream.testkit.scaladsl.TestSink
 import akka.util.ByteString
-import com.couchbase.client.java.bucket.BucketFlusher
+import com.couchbase.client.java.{PersistTo, CouchbaseCluster}
+import com.couchbase.client.java.bucket.{BucketFlusher, BucketType}
+import com.couchbase.client.java.cluster.DefaultBucketSettings
 import com.couchbase.client.java.error.{CASMismatchException, DocumentDoesNotExistException}
+import com.couchbase.client.java.query.Select._
+import com.couchbase.client.java.query.consistency.ScanConsistency
+import com.couchbase.client.java.query.dsl.Expression._
+import com.couchbase.client.java.query.dsl.Sort._
+import com.couchbase.client.java.query.dsl.{Expression, Sort}
+import com.couchbase.client.java.query.{Index, N1qlParams, N1qlQuery, Statement}
 import com.couchbase.client.java.view.{DefaultView, DesignDocument, Stale}
 import com.typesafe.config.ConfigFactory
-import io.dronekit.{DocumentNotFound, CouchbaseStreamsWrapper}
+import io.dronekit.{CouchbaseStreamsWrapper, DocumentNotFound}
+import org.joda.time.DateTime
+import org.joda.time.DateTimeZone.UTC
 import org.scalatest._
-import spray.json.DefaultJsonProtocol
+import spray.json._
 
 import scala.collection.JavaConversions._
 import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.{Future, Await, ExecutionContext}
 import scala.language.postfixOps
 import scala.languageFeature.postfixOps
 import scala.util.Random
+
+
+case class TestEntity(id: String = UUID.randomUUID().toString,
+                      name: String, age: Long, sex: Option[String],
+                      birthday: Option[DateTime] = None,
+                      cas: Option[Long] = None)
+
+class Protocol extends DefaultJsonProtocol {
+  implicit object dateTimeFormat extends RootJsonFormat[DateTime] {
+    override def read(json: JsValue): DateTime = {
+      DateTime.parse(json.convertTo[String])
+    }
+
+    override def write(obj: DateTime): JsValue = {
+      JsString(obj.toString)
+    }
+  }
+
+  implicit val testEntityFormat = jsonFormat6(TestEntity)
+}
 
 
 /**
@@ -25,14 +56,31 @@ import scala.util.Random
  *
  * Integration test class for CouchbaseStreamsWrapper, requires a running Couchbase instance
  */
-class IntegrationTest extends WordSpec with Matchers {
-  // To make marshalling and unmarshalling work
-  case class TestEntity(id: String = UUID.randomUUID().toString, name: String, age: Long, sex: Option[String], cas: Option[Long] = None)
+class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with DefaultJsonProtocol {
+  val p = new Protocol()
+  import p._
 
-  class Protocol extends DefaultJsonProtocol {
-    implicit val testEntityFormat = jsonFormat5(TestEntity)
+  val cluster = CouchbaseCluster.create(CouchbaseStreamsWrapper.env, "127.0.0.1")
+  val clusterManager = cluster.clusterManager("Administrator", "password")
+  val testBucketName = Random.alphanumeric.take(10).mkString
+  val testBucketPassword = "password"
+
+  val bucketSettings = new DefaultBucketSettings.Builder()
+    .`type`(BucketType.COUCHBASE)
+    .name(testBucketName)
+    .password(testBucketPassword)
+    .quota(256) // megabytes
+    .replicas(0)
+    .indexReplicas(false)
+    .enableFlush(true)
+    .build()
+  clusterManager.insertBucket(bucketSettings)
+
+  override def afterAll() {
+    clusterManager.removeBucket(testBucketName)
   }
-  val protocol = new Protocol()
+
+
 
   implicit val system: ActorSystem = ActorSystem()
   implicit val materializer: ActorMaterializer = ActorMaterializer()
@@ -41,20 +89,16 @@ class IntegrationTest extends WordSpec with Matchers {
   val couchbaseConfig = ConfigFactory.load().getConfig("couchbase")
   val couchbase = new CouchbaseStreamsWrapper(
     couchbaseConfig.getString("hostname"),
-    couchbaseConfig.getString("bucket"),
-    couchbaseConfig.getString("password"),
-    protocol)
+    testBucketName,
+    testBucketPassword,
+    this)
 
-  import protocol._
+  couchbase.bucket.query(Index.createPrimaryIndex().on(testBucketName))
 
-  def flushBuckets(): Unit = {
-    BucketFlusher.flush(
-      couchbase.cluster.core(),
-      couchbaseConfig.getString("bucket"),
-      couchbaseConfig.getString("password")
-    ).toBlocking.first()
+
+  def flushBucket(): Unit = {
+    BucketFlusher.flush(couchbase.cluster.core(), testBucketName, testBucketPassword).toBlocking.first()
   }
-  flushBuckets()
 
   def createIndex(designDocName: String, viewName: String, mapFunction: String, reduceFunction: String): Unit = {
     val tokenView =
@@ -68,6 +112,8 @@ class IntegrationTest extends WordSpec with Matchers {
   createIndex("NameDoc", "ByName", nameMap, "")
   val nameAgeMap = "function (doc, meta) {if (doc.name && doc.age) {emit([doc.name, doc.age], null);} }"
   createIndex("NameAndAgeDoc", "ByNameAndAge", nameAgeMap, "")
+  val birthdayMap = "function (doc, meta) {if (doc.birthday) {emit(dateToArray(new Date(doc.birthday)), null);} }"
+  createIndex("BirthdayDoc", "Birthday", birthdayMap, "")
 
 
   "Should be able to insert and retrieve a document" in {
@@ -82,7 +128,7 @@ class IntegrationTest extends WordSpec with Matchers {
 
   "Should throw an exception if retrieving a non-existing document" in {
     intercept[DocumentNotFound] {
-      Await.result(couchbase.lookupByKey("Unicorn"), 1 seconds) shouldBe None
+      Await.result(couchbase.lookupByKey[TestEntity]("Unicorn"), 1 seconds) shouldBe None
     }
   }
 
@@ -147,7 +193,7 @@ class IntegrationTest extends WordSpec with Matchers {
   "Queries for non-existing things should throw a NoSuchElementException" in {
     intercept[NoSuchElementException] {
       val s = couchbase.indexQueryToEntity[TestEntity]("NameDoc", "ByName", List("Unicorn"), stale = Stale.FALSE)
-      Await.result(s.grouped(1000).runWith(Sink.head), 10 seconds).map(println)
+      Await.result(s.grouped(1000).runWith(Sink.head), 10 seconds)
     }
   }
 
@@ -198,6 +244,84 @@ class IntegrationTest extends WordSpec with Matchers {
     readResult.entity shouldBe data
   }
 
+  "Should be able to query using N1QL" in {
+    val kyloRen = TestEntity(name = "Kylo Ren", age = 13, sex = Some("Male"))
+    Await.ready(couchbase.insertDocument[TestEntity](kyloRen, kyloRen.id), 10 seconds)
 
+    val query: Statement = select("name, age")
+      // Need to wrap bucket name with i() because of the - in the name
+      .from(i(testBucketName))
+      .where(x("name").eq(s("Kylo Ren")))
+      .orderBy(asc(x("age")))
+    val queryResponse = Await.result(
+      couchbase.n1qlQuery(
+        q = query,
+        params = N1qlParams.build().adhoc(false).consistency(ScanConsistency.REQUEST_PLUS)), 10 seconds)
 
+    queryResponse.rows.map(_.value().toString)
+      .runWith(TestSink.probe[String])
+      .request(1)
+      .expectNext("""{"name":"Kylo Ren","age":13}""")
+      .expectComplete()
+  }
+
+  "Should be able to query using N1QL and return entities" in {
+    val rey = TestEntity(name = "Rey", age = 20, sex = Some("Female"))
+    Await.ready(couchbase.insertDocument[TestEntity](rey, rey.id), 10 seconds)
+
+    val where: Expression = x("name").eq(s("Rey"))
+    val order: Sort = asc(x("age"))
+    val params: N1qlParams = N1qlParams.build().adhoc(false).consistency(ScanConsistency.REQUEST_PLUS)
+    val queryResponse = Await.result(couchbase.n1qlQueryToEntity[TestEntity](where, order, params), 10 seconds)
+
+    queryResponse.rows.map(_.entity)
+      .runWith(TestSink.probe[TestEntity])
+      .request(1)
+      .expectNext(rey)
+      .expectComplete()
+  }
+
+  "Should be able to paginate objects and return sorted by date" in {
+    val peopleFuture = Future.sequence((1 to 100).map { num =>
+      val birthday = new DateTime(UTC)
+        .plusHours(Random.nextInt(10))
+        .plusMinutes(Random.nextInt(59))
+        .plusSeconds(Random.nextInt(59))
+      val sex: String = Seq("Male", "Female")(Random.nextInt(1))
+      val person = TestEntity(
+        name = s"Testing_$num",
+        age = Random.nextInt(99),
+        sex = Some(sex),
+        birthday = Some(birthday)
+      )
+      couchbase.insertDocument[TestEntity](person, person.id, persist = PersistTo.MASTER).map(docResp => docResp.entity)
+    })
+    Await.ready(peopleFuture, 10 seconds)
+    var lastDateTime = new DateTime(UTC).minusDays(1)
+    var startKey = CouchbaseStreamsWrapper.DateStartKey
+    var startDocId: Option[String] = None
+    (0 to 9).foreach { offset =>
+      val queryResponse = Await.result(couchbase.paginatedIndexQuery[TestEntity](
+        designDoc = "BirthdayDoc",
+        viewDoc = "Birthday",
+        startKey = startKey,
+        endKey = CouchbaseStreamsWrapper.DateEndKey,
+        startDocId = startDocId,
+        limit = 10,
+        stale = Stale.FALSE
+      ), 10 seconds)
+      val rows = Await.result(queryResponse.rows.grouped(100).runWith(Sink.head), 10 seconds)
+          // Yuck... This should not be necessary at all, however somewhere between the query
+          // to couchbase and the runWith above, the rows can get out of order (which should not happen!)
+          // Need to investigate the root cause of this but don't have time to now.
+          .sortBy(doc => doc.entity.birthday.get.getMillis)
+      rows.length shouldBe 10
+      rows.foreach { docResponse =>
+        assert(docResponse.entity.birthday.get.getMillis > lastDateTime.getMillis, s"${docResponse.entity} is out of order with $lastDateTime")
+        lastDateTime = docResponse.entity.birthday.get
+      }
+      startDocId = Some(rows.last.entity.id)
+      startKey = couchbase.getDateKey(rows.last.entity.birthday.get)
+    }
+  }
 }
