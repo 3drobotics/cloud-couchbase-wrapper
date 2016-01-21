@@ -405,17 +405,34 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @param stale Allow stale records
    * @return Observable of AsyncViewRows
    */
-  def compoundIndexQuery(designDoc: String, viewDoc: String, keys: List[List[Any]], stale: Stale = Stale.FALSE,
-                         limit: Int = Int.MaxValue, skip: Int = 0): Observable[AsyncViewRow] = {
+  def compoundIndexQuery(designDoc: String, viewDoc: String, key: Option[Seq[Any]] = None, keys: Option[List[List[Any]]] = None,
+                         startKey: Option[Seq[Any]] = None, endKey: Option[Seq[Any]] = None,
+                         stale: Stale = Stale.FALSE, limit: Int = Int.MaxValue, skip: Int = 0): Observable[AsyncViewRow] = {
     // Couchbase needs a java.util.List
-    val keyList: java.util.List[java.util.List[Any]] = keys.map(seqAsJavaList)
-    val query = ViewQuery
+    var query = ViewQuery
       .from(designDoc, viewDoc)
       .stale(stale)
       .inclusiveEnd(true)
-      .keys(JsonArray.from(keyList))
       .limit(limit)
       .skip(skip)
+
+    if (keys.nonEmpty) {
+      val keyList: java.util.List[java.util.List[Any]] = keys.get.map(seqAsJavaList)
+      query = query.keys(JsonArray.from(keyList))
+    }
+
+    if (key.nonEmpty) {
+      query = query.key(JsonArray.from(seqAsJavaList(key.get)))
+    }
+
+    if (startKey.nonEmpty) {
+      query = query.startKey(JsonArray.from(seqAsJavaList(startKey.get)))
+    }
+
+    if (endKey.nonEmpty) {
+      query = query.endKey(JsonArray.from(seqAsJavaList(endKey.get)))
+    }
+
     toScalaObservable(bucket.async().query(query))
       .flatMap(queryResult => queryResult.rows())
   }
@@ -481,15 +498,18 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     * @param designDoc The name of the design document
    * @param viewDoc The name of the view
    * @param keys The list of keys to query for, where each compound key is a list of keys
+   * @param startKey compound start key range, optional
+   * @param endKey compound end key range, optional
    * @param stale Allow stale records or not
    * @tparam T The type of the entity to unmarshal to
    * @return A Source[T, Any] of the found documents.
    */
-  def compoundIndexQueryToEntity[T](designDoc: String, viewDoc: String, keys: List[List[Any]],
+  def compoundIndexQueryToEntity[T](designDoc: String, viewDoc: String, key: Option[Seq[Any]] = None, keys: Option[List[List[Any]]] = None,
+                                    startKey: Option[Seq[Any]] = None, endKey: Option[Seq[Any]] = None,
                                     stale: Stale = Stale.FALSE, limit: Int = Int.MaxValue, skip: Int = 0)
                                    (implicit format: JsonFormat[T]):
   Source[DocumentResponse[T], Any] = {
-    val query = compoundIndexQuery(designDoc, viewDoc, keys, stale, limit, skip)
+    val query = compoundIndexQuery(designDoc, viewDoc, key, keys, startKey, endKey, stale, limit, skip)
     val docs = withDocuments(query)
     Source.fromPublisher(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
   }
