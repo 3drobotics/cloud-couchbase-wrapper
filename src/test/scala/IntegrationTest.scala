@@ -204,11 +204,38 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     val f2 = couchbase.insertDocument[TestEntity](personTwo, personTwo.id)
     Await.ready(f1 zip f2, 10 seconds)
 
-    val source = couchbase.compoundIndexQueryToEntity[TestEntity](
-      "NameAndAgeDoc", "ByNameAndAge", List(List(personOne.name, personOne.age)), Stale.FALSE)
+    val source = couchbase.compoundIndexQueryByKeysToEntity[TestEntity](
+      "NameAndAgeDoc", "ByNameAndAge", Some(List(List(personOne.name, personOne.age))), Stale.FALSE)
     val result = Await.result(source.grouped(2).runWith(Sink.head), 10 seconds).map(_.entity)
     result.head shouldBe personOne
     result.length shouldBe 1
+  }
+
+  "Should be able to query a compound key with a range" in {
+    // create 10 people with birthdays
+    val peopleFuture = Future.sequence((1 to 10).map { num =>
+      val birthday = new DateTime(UTC)
+        .plusDays(num)
+      val sex: String = Seq("Male", "Female")(Random.nextInt(1))
+      val person = TestEntity(
+        name = s"Testing_$num",
+        age = Random.nextInt(99),
+        sex = Some(sex),
+        birthday = Some(birthday)
+      )
+      couchbase.insertDocument[TestEntity](person, person.id, persist = PersistTo.MASTER).map(docResp => docResp.entity)
+    })
+
+    // query for 5 of them
+    val endDate = new DateTime(UTC).plusDays(5)
+    Await.ready(peopleFuture, 10 seconds)
+    val src = couchbase.compoundIndexQueryByRangeToEntity[TestEntity](
+      "BirthdayDoc", "Birthday", Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), 0, 0, 0, 0)),
+      Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), endDate.getDayOfMonth(), 999, 999, 999)), Stale.FALSE
+    )
+
+    val result = Await.result(src.grouped(10).runWith(Sink.head), 10 seconds).map(_.entity)
+    result.length shouldBe 5
   }
 
   "Should be able to look up a single document" in {
