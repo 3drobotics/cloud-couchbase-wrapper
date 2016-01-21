@@ -204,8 +204,8 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     val f2 = couchbase.insertDocument[TestEntity](personTwo, personTwo.id)
     Await.ready(f1 zip f2, 10 seconds)
 
-    val source = couchbase.compoundIndexQueryToEntity[TestEntity](
-      "NameAndAgeDoc", "ByNameAndAge", Some(List(List(personOne.name, personOne.age))), None, None, Stale.FALSE)
+    val source = couchbase.compoundIndexQueryByKeysToEntity[TestEntity](
+      "NameAndAgeDoc", "ByNameAndAge", Some(List(List(personOne.name, personOne.age))), Stale.FALSE)
     val result = Await.result(source.grouped(2).runWith(Sink.head), 10 seconds).map(_.entity)
     result.head shouldBe personOne
     result.length shouldBe 1
@@ -216,8 +216,6 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     val peopleFuture = Future.sequence((1 to 10).map { num =>
       val birthday = new DateTime(UTC)
         .plusDays(num)
-        .plusMinutes(Random.nextInt(59))
-        .plusSeconds(Random.nextInt(59))
       val sex: String = Seq("Male", "Female")(Random.nextInt(1))
       val person = TestEntity(
         name = s"Testing_$num",
@@ -231,8 +229,8 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     // query for 5 of them
     val endDate = new DateTime(UTC).plusDays(5)
     Await.ready(peopleFuture, 10 seconds)
-    val src = couchbase.compoundIndexQueryToEntity[TestEntity](
-      "BirthdayDoc", "Birthday", None, Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), 0, 0, 0, 0)),
+    val src = couchbase.compoundIndexQueryByRangeToEntity[TestEntity](
+      "BirthdayDoc", "Birthday", Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), 0, 0, 0, 0)),
       Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), endDate.getDayOfMonth(), 999, 999, 999)), Stale.FALSE
     )
 

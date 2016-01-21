@@ -489,27 +489,45 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Query a compound index and unmarshal the found documents into an entity of type T
-    *
-    * @param designDoc The name of the design document
+   * Query a compound index by a set of keys and unmarshal the found documents into an entity of type T
+   *
+   * @param designDoc The name of the design document
    * @param viewDoc The name of the view
    * @param keys The list of keys to query for, where each compound key is a list of keys
-   * @param startKey compound start key range, optional
-   * @param endKey compound end key range, optional
    * @param stale Allow stale records or not
    * @tparam T The type of the entity to unmarshal to
    * @return A Source[T, Any] of the found documents.
    */
-  def compoundIndexQueryToEntity[T](designDoc: String, viewDoc: String, keys: Option[List[List[Any]]] = None,
-                                    startKey: Option[Seq[Any]] = None, endKey: Option[Seq[Any]] = None,
+  def compoundIndexQueryByKeysToEntity[T](designDoc: String, viewDoc: String, keys: Option[List[List[Any]]] = None,
                                     stale: Stale = Stale.FALSE, limit: Int = Int.MaxValue, skip: Int = 0)
                                    (implicit format: JsonFormat[T]):
   Source[DocumentResponse[T], Any] = {
-    val query = compoundIndexQuery(designDoc, viewDoc, keys, startKey, endKey, stale, limit, skip)
+    val query = compoundIndexQuery(designDoc, viewDoc, keys, None, None, stale, limit, skip)
     val docs = withDocuments(query)
     Source.fromPublisher(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
   }
 
+  /**
+   * Query a compound index with a start & end range and unmarshal the results
+   * @param designDoc The name of the design document
+   * @param viewDoc The name of the view
+   * @param startKey compound start key range, optional
+   * @param endKey compound end key range, optional
+   * @param stale Allow stale records or not
+   * @param limit number of results to check, defaults to Int.Max
+   * @param skip number of results to skip, defaults to 0
+   * @tparam T type of entity to unmarshall to
+   * @return A Source[T, Any] of the found documents.
+   */
+  def compoundIndexQueryByRangeToEntity[T](designDoc: String, viewDoc: String, startKey: Option[Seq[Any]] = None,
+                                           endKey: Option[Seq[Any]] = None, stale: Stale = Stale.FALSE,
+                                           limit: Int = Int.MaxValue, skip: Int = 0)
+                                          (implicit format: JsonFormat[T]):
+  Source[DocumentResponse[T], Any] = {
+    val query = compoundIndexQuery(designDoc, viewDoc, None, startKey, endKey, stale, limit, skip)
+    val docs = withDocuments(query)
+    Source.fromPublisher(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
+  }
 
   /**
     * Query couchbase using the N1QL interface. There must be an index created on the bucket for this to succeed.
