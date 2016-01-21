@@ -205,7 +205,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     Await.ready(f1 zip f2, 10 seconds)
 
     val source = couchbase.compoundIndexQueryToEntity[TestEntity](
-      "NameAndAgeDoc", "ByNameAndAge", None, Some(List(List(personOne.name, personOne.age))), None, None, Stale.FALSE)
+      "NameAndAgeDoc", "ByNameAndAge", Some(List(List(personOne.name, personOne.age))), None, None, Stale.FALSE)
     val result = Await.result(source.grouped(2).runWith(Sink.head), 10 seconds).map(_.entity)
     result.head shouldBe personOne
     result.length shouldBe 1
@@ -232,8 +232,8 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     val endDate = new DateTime(UTC).plusDays(5)
     Await.ready(peopleFuture, 10 seconds)
     val src = couchbase.compoundIndexQueryToEntity[TestEntity](
-      "BirthdayDoc", "Birthday", None, None, Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), 0, 0, 0, 0)),
-      Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), endDate.getDayOfMonth(), 99, 99, 99)), Stale.FALSE
+      "BirthdayDoc", "Birthday", None, Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), 0, 0, 0, 0)),
+      Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), endDate.getDayOfMonth(), 999, 999, 999)), Stale.FALSE
     )
 
     val result = Await.result(src.grouped(10).runWith(Sink.head), 10 seconds).map(_.entity)
