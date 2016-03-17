@@ -31,10 +31,19 @@ import scala.languageFeature.postfixOps
 import scala.util.Random
 
 
+trait TestTrait{ val doc: String }
+
 case class TestEntity(id: String = UUID.randomUUID().toString,
                       name: String, age: Long, sex: Option[String],
                       birthday: Option[DateTime] = None,
-                      cas: Option[Long] = None)
+                      cas: Option[Long] = None,
+                      doc: String = "TestEntity") extends TestTrait
+
+case class OtherTestEntity(id: String = UUID.randomUUID().toString,
+                            name: String, location: String,
+                            cas: Option[Long] = None,
+                            doc: String = "OtherTestEntity") extends TestTrait
+
 
 class Protocol extends DefaultJsonProtocol {
   implicit object dateTimeFormat extends RootJsonFormat[DateTime] {
@@ -47,7 +56,31 @@ class Protocol extends DefaultJsonProtocol {
     }
   }
 
-  implicit val testEntityFormat = jsonFormat6(TestEntity)
+  implicit val testEntityFormat = jsonFormat7(TestEntity)
+  implicit val otherTestEntityFormat = jsonFormat5(OtherTestEntity)
+
+  implicit object testTraitFormat extends RootJsonFormat[TestTrait] {
+    override def read(json: JsValue): TestTrait = {
+      json.asJsObject.fields.get("doc") match {
+        case Some(doc) =>
+          doc.convertTo[String] match {
+          case "TestEntity" => json.convertTo[TestEntity]
+          case "OtherTestEntity" => json.convertTo[OtherTestEntity]
+          case str: String => throw new RuntimeException(s"Could not read TestTrait due to other doc type ${str}")
+          case _ => throw new RuntimeException("did not get a string for TestTrait doctype")
+        }
+        case _ => throw new RuntimeException("Could not read TestTrait due to empty doc type")
+      }
+    }
+
+    override def write(obj: TestTrait): JsValue = {
+      obj.doc match {
+        case "TestEntity" => obj.asInstanceOf[TestEntity].toJson
+        case "OtherTestEntity" => obj.asInstanceOf[OtherTestEntity].toJson
+        case _ => throw new RuntimeException("Could not write TestTrait")
+      }
+    }
+  }
 }
 
 
@@ -259,6 +292,32 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     val results = Await.result(source.grouped(2).runWith(Sink.head), 10 seconds)
     results.find(_.entity.id == personOne.id).get.entity shouldBe personOne
     results.find(_.entity.id == personTwo.id).get.entity shouldBe personTwo
+  }
+
+  "Should be able to do a batch update by keys" in {
+    val personOne = TestEntity(name = "Grover", age = 4, sex = Some("male"))
+    val otherPersonTwo = OtherTestEntity(name = "Other", location = "Berkeley")
+    val f1 = couchbase.insertDocument[TestEntity](personOne, personOne.id)
+    val f2 = couchbase.insertDocument[OtherTestEntity](otherPersonTwo, otherPersonTwo.id)
+    val insertResults = Await.ready(f1 zip f2, 10 seconds)
+
+    var personOneCas: Long = 0
+    var personTwoCas: Long = 0
+    insertResults.map{i =>
+      personOneCas = i._1.cas
+      personTwoCas = i._2.cas
+    }
+
+    val updateOne = personOne.copy(age = 5)
+    val updateTwo = otherPersonTwo.copy(location="Oakland")
+    val updateMap: Map[String, (TestTrait, Long)] = Map(personOne.id -> (updateOne, personOneCas),
+      otherPersonTwo.id -> (updateTwo, personTwoCas)
+    )
+
+    val source = couchbase.batchUpdate[TestTrait](updateMap)
+    val results = Await.result(source.grouped(2).runWith(Sink.head), 10 seconds)
+    results.find{r => r.entity.doc == "TestEntity"}.get.entity.asInstanceOf[TestEntity] shouldBe updateOne
+    results.find{r => r.entity.doc == "OtherTestEntity"}.get.entity.asInstanceOf[OtherTestEntity] shouldBe updateTwo
   }
 
   "Should be able to insert and retrieve binary documents" in {

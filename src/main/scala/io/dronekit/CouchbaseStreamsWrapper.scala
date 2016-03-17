@@ -292,6 +292,26 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     observableToSource(docObservable).map(json => convertToEntity[T](json))
   }
 
+  /**
+   * Does a batch update of keys -> each update
+   * Useful for atomic updates of multiple documents
+   * @param keysToDocsMap Map of keys to (documents, cas)
+   * @return
+   */
+  def batchUpdate[T](keysToDocsMap: Map[String, (T, Long)])(implicit format: JsonFormat[T]): Source[DocumentResponse[T], Any] = {
+
+    val docObservable = Observable.from(keysToDocsMap.keys)
+      .flatMap(key => keysToDocsMap.get(key) match {
+        case None => throw new DocumentNotFound(s"Could not find doc for key ${key}")
+        case Some((replacementDoc, cas)) => {
+          val replacement = RawJsonDocument.create(key, marshalEntity[T](replacementDoc), cas)
+          bucket.async().replace(replacement)
+        }
+      })
+
+    observableToSource(docObservable).map(json => convertToEntity[T](json))
+  }
+
 
   /**
    * Remove a document from the database
