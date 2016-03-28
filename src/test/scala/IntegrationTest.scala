@@ -17,7 +17,7 @@ import com.couchbase.client.java.query.dsl.{Expression, Sort}
 import com.couchbase.client.java.query.{Index, N1qlParams, N1qlQuery, Statement}
 import com.couchbase.client.java.view.{DefaultView, DesignDocument, Stale}
 import com.typesafe.config.ConfigFactory
-import io.dronekit.{CouchbaseStreamsWrapper, DocumentNotFound}
+import io.dronekit.{BatchUpdateRequest, CouchbaseStreamsWrapper, DocumentNotFound}
 import org.joda.time.DateTime
 import org.joda.time.DateTimeZone.UTC
 import org.scalatest._
@@ -246,8 +246,9 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
 
   "Should be able to query a compound key with a range" in {
     // create 10 people with birthdays
+    val startDate = new DateTime(UTC)
     val peopleFuture = Future.sequence((1 to 10).map { num =>
-      val birthday = new DateTime(UTC)
+      val birthday = startDate
         .plusDays(num)
       val sex: String = Seq("Male", "Female")(Random.nextInt(1))
       val person = TestEntity(
@@ -263,7 +264,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     val endDate = new DateTime(UTC).plusDays(5)
     Await.ready(peopleFuture, 10 seconds)
     val src = couchbase.compoundIndexQueryByRangeToEntity[TestEntity](
-      "BirthdayDoc", "Birthday", Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), 0, 0, 0, 0)),
+      "BirthdayDoc", "Birthday", Some(Seq(startDate.getYear(), startDate.getMonthOfYear(), 0, 0, 0, 0)),
       Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), endDate.getDayOfMonth(), 999, 999, 999)), Stale.FALSE
     )
 
@@ -310,15 +311,30 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
 
     val updateOne = personOne.copy(age = 5)
     val updateTwo = otherPersonTwo.copy(location="Oakland")
-    val updateMap: Map[String, (TestTrait, Long)] = Map(personOne.id -> (updateOne, personOneCas),
-      otherPersonTwo.id -> (updateTwo, personTwoCas)
-    )
+    val updateSeq: Seq[BatchUpdateRequest[TestTrait]] = Seq(BatchUpdateRequest[TestTrait](key = personOne.id, cas = personOneCas, entity = updateOne), BatchUpdateRequest[TestTrait](key = otherPersonTwo.id, cas = personTwoCas, entity = updateTwo))
 
-    val source = couchbase.batchUpdate[TestTrait](updateMap)
+    val source = couchbase.batchUpdate[TestTrait](updateSeq)
     val results = Await.result(source.grouped(2).runWith(Sink.head), 10 seconds)
     results.find{r => r.entity.doc == "TestEntity"}.get.entity.asInstanceOf[TestEntity] shouldBe updateOne
     results.find{r => r.entity.doc == "OtherTestEntity"}.get.entity.asInstanceOf[OtherTestEntity] shouldBe updateTwo
   }
+
+  "Should error out if one item in the batch update can't be found" in {
+    val personOne = TestEntity(name = "Grover", age = 4, sex = Some("male"))
+    val otherPersonTwo = OtherTestEntity(name = "Other", location = "Berkeley")
+
+    val f1 = couchbase.insertDocument[TestEntity](personOne, personOne.id)
+    val personCas = Await.result(f1, 10 seconds).cas
+
+    val updateOne = personOne.copy(age = 5)
+    val updateSeq: Seq[BatchUpdateRequest[TestTrait]] = Seq(BatchUpdateRequest[TestTrait](key = personOne.id, cas = personCas, entity = updateOne), BatchUpdateRequest[TestTrait](key = "some-bad-key", cas = 123, entity = otherPersonTwo))
+
+    val source = couchbase.batchUpdate[TestTrait](updateSeq)
+    intercept[DocumentDoesNotExistException] {
+      Await.result(source.grouped(2).runWith(Sink.head), 10 seconds)
+    }
+  }
+
 
   "Should be able to insert and retrieve binary documents" in {
     val data = ByteString(Random.alphanumeric.take(100).map(_.toByte).toArray[Byte])

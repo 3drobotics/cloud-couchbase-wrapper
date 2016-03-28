@@ -89,6 +89,9 @@ case class RawQueryResponse(rows: Source[AsyncN1qlQueryRow, Any],
                          status: Future[String],
                          errors: Future[JsonObject],
                          info: Future[N1qlMetrics])
+
+case class BatchUpdateRequest[T](entity: T, cas: Long, key: String)
+
 class DocumentNotFound(message: String) extends RuntimeException(message)
 
 object CouchbaseStreamsWrapper {
@@ -294,17 +297,15 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
 
   /**
    * Does a batch update of keys -> each update
-   * Useful for atomic updates of multiple documents
-   * @param keysToDocsMap Map of keys to (documents, cas)
-   * @return
+   * @param entities Seqence of BatchUpdateRequest to update
+   * @return a source of entities from the batch update request
    */
-  def batchUpdate[T](keysToDocsMap: Map[String, (T, Long)])(implicit format: JsonFormat[T]): Source[DocumentResponse[T], Any] = {
-
-    val docObservable = Observable.from(keysToDocsMap.keys)
-      .flatMap(key => keysToDocsMap.get(key) match {
+  def batchUpdate[T](entities: Seq[BatchUpdateRequest[T]])(implicit format: JsonFormat[T]): Source[DocumentResponse[T], Any] = {
+    val docObservable = Observable.from(entities.map{e => e.key})
+      .flatMap(key => entities.find(e => e.key == key) match {
         case None => throw new DocumentNotFound(s"Could not find doc for key ${key}")
-        case Some((replacementDoc, cas)) => {
-          val replacement = RawJsonDocument.create(key, marshalEntity[T](replacementDoc), cas)
+        case Some(batchUpdateRequest) => {
+          val replacement = RawJsonDocument.create(key, marshalEntity[T](batchUpdateRequest.entity), batchUpdateRequest.cas)
           bucket.async().replace(replacement)
         }
       })
