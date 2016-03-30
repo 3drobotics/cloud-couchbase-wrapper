@@ -297,8 +297,9 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
 
   /**
    * Does a batch update of keys -> each update
-   * @param entities Seqence of BatchUpdateRequest to update
-   * @return a source of entities from the batch update request
+   * Throws a DocumentNotFound exception if all of the keys for the batch updates cannot be found
+   * @param entities Seqence of UpdateObject to update
+   * @return a Future source of entities from the batch update request
    */
   def batchUpdate[T](entities: Seq[UpdateObject[T]])(implicit format: JsonFormat[T]): Future[Source[DocumentResponse[T], Any]] = {
     val lookupSource = batchLookupByKey[T](entities.map{e => e.key}.toList)
