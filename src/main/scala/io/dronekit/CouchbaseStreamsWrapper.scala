@@ -90,7 +90,7 @@ case class RawQueryResponse(rows: Source[AsyncN1qlQueryRow, Any],
                          errors: Future[JsonObject],
                          info: Future[N1qlMetrics])
 
-case class BatchUpdateRequest[T](entity: T, cas: Long, key: String)
+case class UpdateObject[T](entity: T, cas: Long, key: String)
 
 class DocumentNotFound(message: String) extends RuntimeException(message)
 
@@ -300,17 +300,22 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @param entities Seqence of BatchUpdateRequest to update
    * @return a source of entities from the batch update request
    */
-  def batchUpdate[T](entities: Seq[BatchUpdateRequest[T]])(implicit format: JsonFormat[T]): Source[DocumentResponse[T], Any] = {
-    val docObservable = Observable.from(entities.map{e => e.key})
-      .flatMap(key => entities.find(e => e.key == key) match {
-        case None => throw new DocumentNotFound(s"Could not find doc for key ${key}")
-        case Some(batchUpdateRequest) => {
-          val replacement = RawJsonDocument.create(key, marshalEntity[T](batchUpdateRequest.entity), batchUpdateRequest.cas)
-          bucket.async().replace(replacement)
-        }
-      })
+  def batchUpdate[T](entities: Seq[UpdateObject[T]])(implicit format: JsonFormat[T]): Future[Source[DocumentResponse[T], Any]] = {
+    val lookupSource = batchLookupByKey[T](entities.map{e => e.key}.toList)
+    lookupSource.grouped(entities.length).runWith(Sink.head).map{res =>
+      val Expected = entities.length
+      res.length match {
+        case Expected =>
+          val observableSeq = entities.map{e =>
+            val replacement = RawJsonDocument.create(e.key, marshalEntity[T](e.entity), e.cas)
+            bucket.async().replace(replacement)
+          }
 
-    observableToSource(docObservable).map(json => convertToEntity[T](json))
+          val observableCombined = observableSeq.reduce((ob1, ob2) => ob1.mergeWith(ob2))
+          observableToSource(observableCombined).map(json => convertToEntity[T](json))
+        case _ => throw new DocumentNotFound(s"Could not perform a batch update due to missing keys")
+      }
+    }
   }
 
 
