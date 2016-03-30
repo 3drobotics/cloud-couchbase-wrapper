@@ -17,7 +17,7 @@ import com.couchbase.client.java.query.dsl.{Expression, Sort}
 import com.couchbase.client.java.query.{Index, N1qlParams, N1qlQuery, Statement}
 import com.couchbase.client.java.view.{DefaultView, DesignDocument, Stale}
 import com.typesafe.config.ConfigFactory
-import io.dronekit.{CouchbaseStreamsWrapper, DocumentNotFound}
+import io.dronekit.{UpdateObject, CouchbaseStreamsWrapper, DocumentNotFound}
 import org.joda.time.DateTime
 import org.joda.time.DateTimeZone.UTC
 import org.scalatest._
@@ -31,10 +31,19 @@ import scala.languageFeature.postfixOps
 import scala.util.Random
 
 
+trait TestTrait{ val doc: String }
+
 case class TestEntity(id: String = UUID.randomUUID().toString,
                       name: String, age: Long, sex: Option[String],
                       birthday: Option[DateTime] = None,
-                      cas: Option[Long] = None)
+                      cas: Option[Long] = None,
+                      doc: String = "TestEntity") extends TestTrait
+
+case class OtherTestEntity(id: String = UUID.randomUUID().toString,
+                            name: String, location: String,
+                            cas: Option[Long] = None,
+                            doc: String = "OtherTestEntity") extends TestTrait
+
 
 class Protocol extends DefaultJsonProtocol {
   implicit object dateTimeFormat extends RootJsonFormat[DateTime] {
@@ -47,7 +56,31 @@ class Protocol extends DefaultJsonProtocol {
     }
   }
 
-  implicit val testEntityFormat = jsonFormat6(TestEntity)
+  implicit val testEntityFormat = jsonFormat7(TestEntity)
+  implicit val otherTestEntityFormat = jsonFormat5(OtherTestEntity)
+
+  implicit object testTraitFormat extends RootJsonFormat[TestTrait] {
+    override def read(json: JsValue): TestTrait = {
+      json.asJsObject.fields.get("doc") match {
+        case Some(doc) =>
+          doc.convertTo[String] match {
+          case "TestEntity" => json.convertTo[TestEntity]
+          case "OtherTestEntity" => json.convertTo[OtherTestEntity]
+          case str: String => throw new RuntimeException(s"Could not read TestTrait due to other doc type ${str}")
+          case _ => throw new RuntimeException("did not get a string for TestTrait doctype")
+        }
+        case _ => throw new RuntimeException("Could not read TestTrait due to empty doc type")
+      }
+    }
+
+    override def write(obj: TestTrait): JsValue = {
+      obj.doc match {
+        case "TestEntity" => obj.asInstanceOf[TestEntity].toJson
+        case "OtherTestEntity" => obj.asInstanceOf[OtherTestEntity].toJson
+        case _ => throw new RuntimeException("Could not write TestTrait")
+      }
+    }
+  }
 }
 
 
@@ -213,8 +246,9 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
 
   "Should be able to query a compound key with a range" in {
     // create 10 people with birthdays
+    val startDate = new DateTime(UTC)
     val peopleFuture = Future.sequence((1 to 10).map { num =>
-      val birthday = new DateTime(UTC)
+      val birthday = startDate
         .plusDays(num)
       val sex: String = Seq("Male", "Female")(Random.nextInt(1))
       val person = TestEntity(
@@ -230,7 +264,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     val endDate = new DateTime(UTC).plusDays(5)
     Await.ready(peopleFuture, 10 seconds)
     val src = couchbase.compoundIndexQueryByRangeToEntity[TestEntity](
-      "BirthdayDoc", "Birthday", Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), 0, 0, 0, 0)),
+      "BirthdayDoc", "Birthday", Some(Seq(startDate.getYear(), startDate.getMonthOfYear(), 0, 0, 0, 0)),
       Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), endDate.getDayOfMonth(), 999, 999, 999)), Stale.FALSE
     )
 
@@ -260,6 +294,58 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     results.find(_.entity.id == personOne.id).get.entity shouldBe personOne
     results.find(_.entity.id == personTwo.id).get.entity shouldBe personTwo
   }
+
+  "Should be able to do a batch update by keys" in {
+    val personOne = TestEntity(name = "Grover", age = 4, sex = Some("male"))
+    val otherPersonTwo = OtherTestEntity(name = "Other", location = "Berkeley")
+    val f1 = couchbase.insertDocument[TestEntity](personOne, personOne.id)
+    val f2 = couchbase.insertDocument[OtherTestEntity](otherPersonTwo, otherPersonTwo.id)
+    val insertResults = Await.ready(f1 zip f2, 10 seconds)
+
+    insertResults.map{ case (p1, p2) =>
+      val updateOne = personOne.copy(age = 5)
+      val updateTwo = otherPersonTwo.copy(location="Oakland")
+      val updateSeq: Seq[UpdateObject[TestTrait]] = Seq(UpdateObject[TestTrait](key = personOne.id, cas = p1.cas, entity = updateOne), UpdateObject[TestTrait](key = otherPersonTwo.id, cas = p2.cas, entity = updateTwo))
+
+      val sourceFut = couchbase.batchUpdate[TestTrait](updateSeq)
+      val source = Await.result(sourceFut, 10 seconds)
+      val results = Await.result(source.grouped(2).runWith(Sink.head), 10 seconds)
+      results.find{r => r.entity.doc == "TestEntity"}.get.entity.asInstanceOf[TestEntity] shouldBe updateOne
+      results.find{r => r.entity.doc == "OtherTestEntity"}.get.entity.asInstanceOf[OtherTestEntity] shouldBe updateTwo
+    }
+  }
+
+  "Should error out if one item in the batch update can't be found" in {
+    val personOne = TestEntity(name = "Grover", age = 4, sex = Some("male"))
+    val personTwo = TestEntity(name = "Other", age = 4, sex = Some("male"))
+    val personThree = TestEntity(name = "Grover2", age = 5, sex = Some("male"))
+    val personFour = TestEntity(name = "Grover3", age = 6, sex = Some("male"))
+
+    val f1 = couchbase.insertDocument[TestEntity](personOne, personOne.id)
+    val f2 = couchbase.insertDocument[TestEntity](personThree, personThree.id)
+    val f3 = couchbase.insertDocument[TestEntity](personFour, personFour.id)
+
+    val aggFut = for {
+      f1res <-f1
+      f2res <-f2
+      f3res <-f3
+    } yield (f1res.cas, f2res.cas, f3res.cas)
+    val casRes = Await.result(aggFut, 10 seconds)
+
+    val updateOne = personOne.copy(age = 5)
+    val updateSeq: Seq[UpdateObject[TestTrait]] = Seq(
+      UpdateObject[TestTrait](key = personOne.id, cas = casRes._1, entity = updateOne),
+      UpdateObject[TestTrait](key = "some-bad-key", cas = 123, entity = personTwo),
+      UpdateObject[TestTrait](key = personThree.id, cas = casRes._2, entity = personThree.copy(age=6)),
+      UpdateObject[TestTrait](key = personFour.id, cas = casRes._3, entity = personFour.copy(age=7)))
+
+    val sourceFut = couchbase.batchUpdate[TestTrait](updateSeq)
+    intercept[DocumentNotFound] {
+      val source = Await.result(sourceFut, 10 seconds)
+      Await.result(source.grouped(4).runWith(Sink.head), 10 seconds)
+    }
+  }
+
 
   "Should be able to insert and retrieve binary documents" in {
     val data = ByteString(Random.alphanumeric.take(100).map(_.toByte).toArray[Byte])
