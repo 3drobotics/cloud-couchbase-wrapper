@@ -2,7 +2,7 @@ name := "couchbasestreamswrapper"
 
 organization := "io.dronekit"
 
-version := "2.4.0"
+version := "2.4.1"
 
 scalaVersion := "2.11.8"
 
@@ -31,9 +31,9 @@ libraryDependencies ++= {
     "io.spray" %%  "spray-json" % "1.3.2",
     "ch.qos.logback" % "logback-classic" % "1.1.3",
     "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0",
-    "com.couchbase.client" % "java-client" % "2.2.3",
+    "com.couchbase.client" % "java-client" % "2.2.6",
     "io.reactivex" % "rxjava-reactive-streams" % "1.0.1",
-    "io.reactivex" %% "rxscala" % "0.25.0",
+    "io.reactivex" %% "rxscala" % "0.26.1",
     "joda-time" % "joda-time" % "2.9.1",
     "org.scalatest" %% "scalatest" % scalaTestV % "test"
   )
