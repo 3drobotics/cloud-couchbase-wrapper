@@ -239,7 +239,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
                        (implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
     val jsonString = marshalEntity[T](entity)
     val doc = RawJsonDocument.create(key, expiry, jsonString)
-    val insertObservable = bucket.async().insert(doc)
+    val insertObservable = bucket.async().insert(doc, persist, replicate)
     convertToEntity[T](insertObservable)
   }
 
