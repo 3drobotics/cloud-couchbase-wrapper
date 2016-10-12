@@ -12,7 +12,7 @@ import akka.stream.scaladsl.{Sink, Source}
 import akka.util.ByteString
 import com.couchbase.client.deps.io.netty.buffer._
 import com.couchbase.client.deps.io.netty.util.ReferenceCountUtil
-import com.couchbase.client.java.{ReplicateTo, PersistTo, CouchbaseCluster}
+import com.couchbase.client.java.{CouchbaseCluster, PersistTo, ReplicateTo}
 import com.couchbase.client.java.document.json.{JsonArray, JsonObject}
 import com.couchbase.client.java.document.{BinaryDocument, JsonDocument, RawJsonDocument}
 import com.couchbase.client.java.env.DefaultCouchbaseEnvironment
@@ -25,10 +25,10 @@ import com.typesafe.scalalogging.Logger
 import org.joda.time.DateTime
 import org.joda.time.DateTimeZone.UTC
 import org.slf4j.LoggerFactory
+import play.api.libs.json._
 import rx.RxReactiveStreams
 import rx.lang.scala.JavaConversions.{toJavaObservable, toScalaObservable}
 import rx.lang.scala.Observable
-import spray.json.{DefaultJsonProtocol, _}
 
 import scala.collection.JavaConversions._
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -116,11 +116,10 @@ object CouchbaseStreamsWrapper {
   * @param host Hostname of the couchbase server to connect to
   * @param bucketName Name of the bucket to connect to
   * @param password The password for the bucket
-  * @param protocol A Spray-Json protocol to marshall/unmarshall documents to case classes
   * @param ec Execution Context for Futures and Streams
   * @param mat Materializer for Akka-Streams
   */
-class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String, protocol: DefaultJsonProtocol)
+class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String)
                     (implicit ec: ExecutionContext, mat: ActorMaterializer)
 {
   // Reuse the env here
@@ -166,8 +165,8 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @tparam T The type of the entity to convert from
    * @return A string encoding of the entity in json format
    */
-  private def marshalEntity[T](entity: T)(implicit format: JsonFormat[T]): String = {
-    entity.toJson.compactPrint
+  private def marshalEntity[T](entity: T)(implicit format: Format[T]): String = {
+    Json.stringify(Json.toJson(entity))
   }
 
   /**
@@ -179,10 +178,10 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @return A DocumentResponse with the entity and the current CAS value
    */
   private def convertToEntity[T](docObservable: Observable[RawJsonDocument])
-                                (implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
+                                (implicit format: Format[T]): Future[DocumentResponse[T]] = {
     val p = Promise[DocumentResponse[T]]
     toScalaObservable(docObservable).subscribe(
-      doc => p.trySuccess(DocumentResponse(cas = doc.cas(), entity = doc.content().parseJson.convertTo[T])),
+      doc => p.trySuccess(DocumentResponse(cas = doc.cas(), entity = Json.parse(doc.content()).as[T])),
       e => p.tryFailure(e),
       () => p.tryFailure(new DocumentNotFound(""))
     )
@@ -197,12 +196,12 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @tparam T The type parameter to convert to
    * @return A DocumentResponse with the entity and the current CAS value
    */
-  private def convertToEntity[T](jsonDocument: RawJsonDocument)(implicit format: JsonFormat[T]): DocumentResponse[T] = {
+  private def convertToEntity[T](jsonDocument: RawJsonDocument)(implicit format: Format[T]): DocumentResponse[T] = {
     try {
-      val entity = jsonDocument.content().parseJson.convertTo[T]
+      val entity = Json.parse(jsonDocument.content()).as[T]
       DocumentResponse(cas = jsonDocument.cas(), entity = entity)
     } catch {
-      case ex: DeserializationException =>
+      case ex: JsResultException =>
         log.error(s"Caught $ex when converting:\n ${jsonDocument.content()}")
         throw ex
     }
@@ -217,7 +216,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @tparam T The type of the entity
    * @return The replaced document in the database
    */
-  def replaceDocument[T](entity: T, key: String, cas: Long)(implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
+  def replaceDocument[T](entity: T, key: String, cas: Long)(implicit format: Format[T]): Future[DocumentResponse[T]] = {
     val jsonString = marshalEntity[T](entity)
     val doc = RawJsonDocument.create(key, jsonString, cas)
     val replaceObservable = bucket.async().replace(doc)
@@ -236,7 +235,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    */
   def insertDocument[T](entity: T, key: String, expiry: Int = 0,
                         persist: PersistTo = PersistTo.NONE, replicate: ReplicateTo = ReplicateTo.NONE)
-                       (implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
+                       (implicit format: Format[T]): Future[DocumentResponse[T]] = {
     val jsonString = marshalEntity[T](entity)
     val doc = RawJsonDocument.create(key, expiry, jsonString)
     val insertObservable = bucket.async().insert(doc)
@@ -250,7 +249,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @tparam T The type to unmarshal the returned document to
    * @return A Future with the object T if found, otherwise None
    */
-  def lookupByKey[T](key: String)(implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
+  def lookupByKey[T](key: String)(implicit format: Format[T]): Future[DocumentResponse[T]] = {
     val docObservable = bucket.async().get(key, classOf[RawJsonDocument])
     convertToEntity[T](docObservable)
   }
@@ -288,7 +287,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @return A Source of RawJsonDocuments
    */
   def batchLookupByKey[T](keys: List[String])
-                         (implicit format: JsonFormat[T]):
+                         (implicit format: Format[T]):
   Source[DocumentResponse[T], Any] = {
     val docObservable = Observable.from(keys)
       .flatMap(key => bucket.async().get(key, classOf[RawJsonDocument]))
@@ -301,7 +300,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @param entities Seqence of UpdateObject to update
    * @return a Future source of entities from the batch update request
    */
-  def batchUpdate[T](entities: Seq[UpdateObject[T]])(implicit format: JsonFormat[T]): Future[Source[DocumentResponse[T], Any]] = {
+  def batchUpdate[T](entities: Seq[UpdateObject[T]])(implicit format: Format[T]): Future[Source[DocumentResponse[T], Any]] = {
     val lookupSource = batchLookupByKey[T](entities.map{e => e.key}.toList)
     lookupSource.grouped(entities.length).runWith(Sink.head).map{res =>
       val Expected = entities.length
@@ -345,7 +344,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @return The unmarshalled entity if successful
    */
   def getEntityFromRow[T](row: AsyncViewRow)
-                         (implicit format: JsonFormat[T]):
+                         (implicit format: Format[T]):
   Future[DocumentResponse[T]] = {
     convertToEntity[T](row.document(classOf[RawJsonDocument]))
   }
@@ -462,7 +461,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
 
   def paginatedIndexQuery[T](designDoc: String, viewDoc: String, startKey: Seq[Any], endKey: Seq[Any],
                           startDocId: Option[String] = None, stale: Stale = Stale.FALSE, limit: Int = 100)
-                         (implicit format: JsonFormat[T]): Future[ViewQueryResponse[T]] = {
+                         (implicit format: Format[T]): Future[ViewQueryResponse[T]] = {
     if (startKey.length != endKey.length) throw new IllegalArgumentException("startKey and endKey must be the same length")
     val query = ViewQuery
       .from(designDoc, viewDoc)
@@ -509,7 +508,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    */
   def indexQueryToEntity[T](designDoc: String, viewDoc: String, keys: List[String] = List(), stale: Stale = Stale.FALSE,
                            limit: Int = Int.MaxValue, skip: Int = 0)
-                           (implicit format: JsonFormat[T]): Source[DocumentResponse[T], Any] = {
+                           (implicit format: Format[T]): Source[DocumentResponse[T], Any] = {
     val query = indexQuery(designDoc, viewDoc, keys, stale, limit, skip)
     val docs = withDocuments(query)
     Source.fromPublisher(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
@@ -527,7 +526,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    */
   def compoundIndexQueryByKeysToEntity[T](designDoc: String, viewDoc: String, keys: Option[List[List[Any]]] = None,
                                     stale: Stale = Stale.FALSE, limit: Int = Int.MaxValue, skip: Int = 0)
-                                   (implicit format: JsonFormat[T]):
+                                   (implicit format: Format[T]):
   Source[DocumentResponse[T], Any] = {
     val query = compoundIndexQuery(designDoc, viewDoc, keys, None, None, stale, limit, skip)
     val docs = withDocuments(query)
@@ -549,7 +548,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   def compoundIndexQueryByRangeToEntity[T](designDoc: String, viewDoc: String, startKey: Option[Seq[Any]] = None,
                                            endKey: Option[Seq[Any]] = None, stale: Stale = Stale.FALSE,
                                            limit: Int = Int.MaxValue, skip: Int = 0)
-                                          (implicit format: JsonFormat[T]):
+                                          (implicit format: Format[T]):
   Source[DocumentResponse[T], Any] = {
     val query = compoundIndexQuery(designDoc, viewDoc, None, startKey, endKey, stale, limit, skip)
     val docs = withDocuments(query)
@@ -605,7 +604,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     */
   def n1qlQueryToEntity[T](where: Expression, order: Sort, params: N1qlParams = N1qlParams.build().adhoc(false),
                            limit: Int = 100, offset: Int = 0)
-                          (implicit format: JsonFormat[T]): Future[QueryResponse[T]] = {
+                          (implicit format: Format[T]): Future[QueryResponse[T]] = {
     val s: Statement = select("*, meta().cas")
       // Need to wrap bucket name with i() because of the - in the name
       .from(i(bucketName))
@@ -619,7 +618,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
         rows = observableToSource[AsyncN1qlQueryRow](queryResult.rows())
           .map{ row =>
             val cas = row.value().getLong("cas")
-            val entity = row.value().getObject(bucketName).toString.parseJson.convertTo[T]
+            val entity = Json.parse(row.value().getObject(bucketName).toString).as[T]
             DocumentResponse[T](cas, entity)},
         status = observableToFuture[String](queryResult.status()),
         errors = observableToFuture(queryResult.errors()),
@@ -655,13 +654,13 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     * @return A QueryResponse with the results.
     */
   def n1qlParameterizedQueryToEntity[T](query: ParameterizedN1qlQuery)
-                                       (implicit format: JsonFormat[T]): Future[QueryResponse[T]] = {
+                                       (implicit format: Format[T]): Future[QueryResponse[T]] = {
     observableToFuture(bucket.async().query(query))
       .map{ queryResult => QueryResponse[T](
         rows = observableToSource[AsyncN1qlQueryRow](queryResult.rows())
           .map{ row =>
             val cas = row.value().getLong("cas")
-            val entity = row.value().getObject(bucketName).toString.parseJson.convertTo[T]
+            val entity = Json.parse(row.value().getObject(bucketName).toString).as[T]
             DocumentResponse[T](cas, entity)},
         status = observableToFuture[String](queryResult.status()),
         errors = observableToFuture(queryResult.errors()),

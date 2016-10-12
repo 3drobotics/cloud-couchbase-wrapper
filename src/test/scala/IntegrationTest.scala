@@ -5,7 +5,7 @@ import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
 import akka.stream.testkit.scaladsl.TestSink
 import akka.util.ByteString
-import com.couchbase.client.java.{PersistTo, CouchbaseCluster}
+import com.couchbase.client.java.{CouchbaseCluster, PersistTo}
 import com.couchbase.client.java.bucket.{BucketFlusher, BucketType}
 import com.couchbase.client.java.cluster.DefaultBucketSettings
 import com.couchbase.client.java.error.{CASMismatchException, DocumentDoesNotExistException}
@@ -17,15 +17,19 @@ import com.couchbase.client.java.query.dsl.{Expression, Sort}
 import com.couchbase.client.java.query.{Index, N1qlParams, N1qlQuery, Statement}
 import com.couchbase.client.java.view.{DefaultView, DesignDocument, Stale}
 import com.typesafe.config.ConfigFactory
-import io.dronekit.{UpdateObject, CouchbaseStreamsWrapper, DocumentNotFound}
+import io.dronekit.{CouchbaseStreamsWrapper, DocumentNotFound, UpdateObject}
 import org.joda.time.DateTime
 import org.joda.time.DateTimeZone.UTC
 import org.scalatest._
-import spray.json._
+
+import play.api.libs.json._
+import play.api.libs.json.Reads._
+import play.api.libs.json.Writes._
+import play.api.libs.functional.syntax._
 
 import scala.collection.JavaConversions._
 import scala.concurrent.duration._
-import scala.concurrent.{Future, Await, ExecutionContext}
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.language.postfixOps
 import scala.languageFeature.postfixOps
 import scala.util.Random
@@ -45,38 +49,42 @@ case class OtherTestEntity(id: String = UUID.randomUUID().toString,
                             doc: String = "OtherTestEntity") extends TestTrait
 
 
-class Protocol extends DefaultJsonProtocol {
-  implicit object dateTimeFormat extends RootJsonFormat[DateTime] {
-    override def read(json: JsValue): DateTime = {
-      DateTime.parse(json.convertTo[String])
+class Protocol {
+
+  implicit val dateTimeFormat  = new Format[DateTime] {
+
+    override def reads(json: JsValue): JsResult[DateTime] = {
+      JsSuccess(DateTime.parse(json.as[String]))
     }
 
-    override def write(obj: DateTime): JsValue = {
-      JsString(obj.toString)
+    override def writes(o: DateTime): JsValue = {
+      JsString(o.toString)
     }
   }
 
-  implicit val testEntityFormat = jsonFormat7(TestEntity)
-  implicit val otherTestEntityFormat = jsonFormat5(OtherTestEntity)
+  implicit val testEntityFormat = Json.format[TestEntity]
 
-  implicit object testTraitFormat extends RootJsonFormat[TestTrait] {
-    override def read(json: JsValue): TestTrait = {
-      json.asJsObject.fields.get("doc") match {
+  implicit val otherTestEntityFormat = Json.format[OtherTestEntity]
+
+  implicit val testTraitFormat = new Format[TestTrait] {
+
+    override def reads(json: JsValue): JsResult[TestTrait] = {
+      json.\("doc").validateOpt[String] map {
         case Some(doc) =>
-          doc.convertTo[String] match {
-          case "TestEntity" => json.convertTo[TestEntity]
-          case "OtherTestEntity" => json.convertTo[OtherTestEntity]
-          case str: String => throw new RuntimeException(s"Could not read TestTrait due to other doc type ${str}")
-          case _ => throw new RuntimeException("did not get a string for TestTrait doctype")
-        }
+          doc match {
+            case "TestEntity" => json.as[TestEntity]
+            case "OtherTestEntity" => json.as[OtherTestEntity]
+            case str: String => throw new RuntimeException(s"Could not read TestTrait due to other doc type ${str}")
+            case _ => throw new RuntimeException("did not get a string for TestTrait doctype")
+          }
         case _ => throw new RuntimeException("Could not read TestTrait due to empty doc type")
       }
     }
 
-    override def write(obj: TestTrait): JsValue = {
-      obj.doc match {
-        case "TestEntity" => obj.asInstanceOf[TestEntity].toJson
-        case "OtherTestEntity" => obj.asInstanceOf[OtherTestEntity].toJson
+    override def writes(o: TestTrait): JsValue = {
+      o.doc match {
+        case "TestEntity" => Json.toJson(o.asInstanceOf[TestEntity])
+        case "OtherTestEntity" => Json.toJson(o.asInstanceOf[OtherTestEntity])
         case _ => throw new RuntimeException("Could not write TestTrait")
       }
     }
@@ -89,7 +97,7 @@ class Protocol extends DefaultJsonProtocol {
  *
  * Integration test class for CouchbaseStreamsWrapper, requires a running Couchbase instance
  */
-class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with DefaultJsonProtocol {
+class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
   val p = new Protocol()
   import p._
 
@@ -123,8 +131,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
   val couchbase = new CouchbaseStreamsWrapper(
     couchbaseConfig.getString("hostname"),
     testBucketName,
-    testBucketPassword,
-    this)
+    testBucketPassword)
 
   couchbase.bucket.query(Index.createPrimaryIndex().on(testBucketName))
 
