@@ -102,7 +102,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
   import p._
 
   val cluster = CouchbaseCluster.create(CouchbaseStreamsWrapper.env, "127.0.0.1")
-  val clusterManager = cluster.clusterManager("Administrator", "password")
+  val clusterManager = cluster.clusterManager("Admin", "Password")
   val testBucketName = Random.alphanumeric.take(10).mkString
   val testBucketPassword = "password"
 
@@ -164,6 +164,18 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
     val result = Await.result(getFuture, 10 seconds)
     result.cas should not be 0
     result.entity shouldBe entity
+  }
+
+  "Should be able to insert expiring document and touch" in {
+    val entity = TestEntity(name = "Jill", age = 23, sex = None)
+    val insertFuture = couchbase.insertDocument[TestEntity](entity, entity.id, 555)
+    Await.ready(insertFuture, 10 seconds)
+    val getTouchFuture = couchbase.touchByKey(entity.id)
+    val getDocumentFuture = couchbase.lookupByKey[TestEntity](entity.id)
+
+    val touchResult = Await.result(getTouchFuture, 10 seconds)
+    val getDocumentResult = Await.result(getDocumentFuture, 10 seconds)
+    touchResult shouldBe true
   }
 
   "Should throw an exception if retrieving a non-existing document" in {
@@ -370,7 +382,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
 
     val query: Statement = select("name, age")
       // Need to wrap bucket name with i() because of the - in the name
-      .from(i(testBucketName))
+
       .where(x("name").eq(s("Kylo Ren")))
       .orderBy(asc(x("age")))
     val queryResponse = Await.result(

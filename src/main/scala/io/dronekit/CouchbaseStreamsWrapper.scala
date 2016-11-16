@@ -1,9 +1,9 @@
 package io.dronekit
 
 /**
- * Created by Jason Martens <jason.martens@3drobotics.com> on 9/16/15.
- *
- */
+  * Created by Jason Martens <jason.martens@3drobotics.com> on 9/16/15.
+  *
+  */
 
 import java.util.NoSuchElementException
 
@@ -35,11 +35,11 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
 /**
- * Created by Jason Martens <jason.martens@3drobotics.com> on 7/31/15.
- *
- * Wrapper class to convert the RxJava interface to Akka-Streams
- *
- */
+  * Created by Jason Martens <jason.martens@3drobotics.com> on 7/31/15.
+  *
+  * Wrapper class to convert the RxJava interface to Akka-Streams
+  *
+  */
 
 
 /**
@@ -61,9 +61,9 @@ case class DocumentResponse[T](cas: Long, entity: T)
   * @tparam T The type of the entity
   */
 case class QueryResponse[T](rows: Source[DocumentResponse[T], Any],
-                         status: Future[String],
-                         errors: Future[JsonObject],
-                         info: Future[N1qlMetrics])
+                            status: Future[String],
+                            errors: Future[JsonObject],
+                            info: Future[N1qlMetrics])
 
 /**
   * Wraps returned values in a DocumentResponse
@@ -74,8 +74,8 @@ case class QueryResponse[T](rows: Source[DocumentResponse[T], Any],
   * @tparam T The type of the entity
   */
 case class ViewQueryResponse[T](rows: Source[DocumentResponse[T], Any],
-                            errors: Future[JsonObject],
-                            debug: JsonObject)
+                                errors: Future[JsonObject],
+                                debug: JsonObject)
 
 /**
   * Returned values are AsyncN1qlQueryRow(s), no CAS value is returned unless the query included it
@@ -86,9 +86,9 @@ case class ViewQueryResponse[T](rows: Source[DocumentResponse[T], Any],
   * @param info Metrics on the query as reported by Couchbase
   */
 case class RawQueryResponse(rows: Source[AsyncN1qlQueryRow, Any],
-                         status: Future[String],
-                         errors: Future[JsonObject],
-                         info: Future[N1qlMetrics])
+                            status: Future[String],
+                            errors: Future[JsonObject],
+                            info: Future[N1qlMetrics])
 
 case class UpdateObject[T](entity: T, cas: Long, key: String)
 
@@ -120,20 +120,19 @@ object CouchbaseStreamsWrapper {
   * @param mat Materializer for Akka-Streams
   */
 class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String)
-                    (implicit ec: ExecutionContext, mat: ActorMaterializer)
-{
+                             (implicit ec: ExecutionContext, mat: ActorMaterializer) {
   // Reuse the env here
   val cluster = CouchbaseCluster.create(CouchbaseStreamsWrapper.env, host)
   val bucket = cluster.openBucket(bucketName, password)
   val log: Logger = Logger(LoggerFactory.getLogger(getClass))
 
   /**
-   * Convert an Observable with a single element into a Future
+    * Convert an Observable with a single element into a Future
     *
     * @param observable The source to convert
-   * @tparam T The type of the resulting Future
-   * @return The future
-   */
+    * @tparam T The type of the resulting Future
+    * @return The future
+    */
   private def observableToFuture[T](observable: Observable[T], empty: Option[T] = None): Future[T] = {
     val p = Promise[T]
     toScalaObservable(observable).subscribe(
@@ -147,36 +146,36 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Convert an RxJava observable into an Akka-Streams Source
+    * Convert an RxJava observable into an Akka-Streams Source
     *
     * @param observable The observable to convert from
-   * @tparam T The type parameter of the observable/source
-   * @return An Akka-Streams Source
-   */
+    * @tparam T The type parameter of the observable/source
+    * @return An Akka-Streams Source
+    */
   private def observableToSource[T](observable: rx.lang.scala.Observable[T]): Source[T, Any] = {
     Source.fromPublisher(RxReactiveStreams.toPublisher(observable))
   }
 
   /**
-   * Convert an entity of type T into a json string
+    * Convert an entity of type T into a json string
     *
     * @param entity The entity to convert from
-   * @param format The json format implicit to use for conversion
-   * @tparam T The type of the entity to convert from
-   * @return A string encoding of the entity in json format
-   */
+    * @param format The json format implicit to use for conversion
+    * @tparam T The type of the entity to convert from
+    * @return A string encoding of the entity in json format
+    */
   private def marshalEntity[T](entity: T)(implicit format: Format[T]): String = {
     Json.stringify(Json.toJson(entity))
   }
 
   /**
-   * Using spray-json, convert the found document into an entity of type T
+    * Using spray-json, convert the found document into an entity of type T
     *
     * @param docObservable The observable to get the json document from
-   * @param format The json format implicit to use for conversion
-   * @tparam T The type parameter to convert to
-   * @return A DocumentResponse with the entity and the current CAS value
-   */
+    * @param format The json format implicit to use for conversion
+    * @tparam T The type parameter to convert to
+    * @return A DocumentResponse with the entity and the current CAS value
+    */
   private def convertToEntity[T](docObservable: Observable[RawJsonDocument])
                                 (implicit format: Format[T]): Future[DocumentResponse[T]] = {
     val p = Promise[DocumentResponse[T]]
@@ -189,13 +188,13 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Using spray-json, convert the found document into an entity of type T
+    * Using spray-json, convert the found document into an entity of type T
     *
     * @param jsonDocument The document retrieved
-   * @param format The json format implicit to use for conversion
-   * @tparam T The type parameter to convert to
-   * @return A DocumentResponse with the entity and the current CAS value
-   */
+    * @param format The json format implicit to use for conversion
+    * @tparam T The type parameter to convert to
+    * @return A DocumentResponse with the entity and the current CAS value
+    */
   private def convertToEntity[T](jsonDocument: RawJsonDocument)(implicit format: Format[T]): DocumentResponse[T] = {
     try {
       val entity = Json.parse(jsonDocument.content()).as[T]
@@ -208,14 +207,14 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Replace a document in couchbase with the given entity by marshalling it to
-   * json, then returning the unmarshalled json returned from couchbase
+    * Replace a document in couchbase with the given entity by marshalling it to
+    * json, then returning the unmarshalled json returned from couchbase
     *
     * @param entity Overwrite the document in the database with this entity
-   * @param key The document to overwrite
-   * @tparam T The type of the entity
-   * @return The replaced document in the database
-   */
+    * @param key The document to overwrite
+    * @tparam T The type of the entity
+    * @return The replaced document in the database
+    */
   def replaceDocument[T](entity: T, key: String, cas: Long)(implicit format: Format[T]): Future[DocumentResponse[T]] = {
     val jsonString = marshalEntity[T](entity)
     val doc = RawJsonDocument.create(key, jsonString, cas)
@@ -225,14 +224,14 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
 
 
   /**
-   * Marshall entity to json, insert it into the database, then unmarshal the response and return it
+    * Marshall entity to json, insert it into the database, then unmarshal the response and return it
     *
     * @param entity The object to insert
-   * @param key The location to insert it to
-   * @param expiry optional expiry time in seconds, 0 (stored indefinitely) if not set
-   * @tparam T The type of the object
-   * @return The resulting document after it has been inserted
-   */
+    * @param key The location to insert it to
+    * @param expiry optional expiry time in seconds, 0 (stored indefinitely) if not set
+    * @tparam T The type of the object
+    * @return The resulting document after it has been inserted
+    */
   def insertDocument[T](entity: T, key: String, expiry: Int = 0,
                         persist: PersistTo = PersistTo.NONE, replicate: ReplicateTo = ReplicateTo.NONE)
                        (implicit format: Format[T]): Future[DocumentResponse[T]] = {
@@ -243,16 +242,40 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Lookup a document in couchbase by the key, and unmarshal it into an object: T
+    * Lookup a document in couchbase by the key, and unmarshal it into an object: T
     *
     * @param key The key to lookup in the database
-   * @tparam T The type to unmarshal the returned document to
-   * @return A Future with the object T if found, otherwise None
-   */
+    * @tparam T The type to unmarshal the returned document to
+    * @return A Future with the object T if found, otherwise None
+    */
   def lookupByKey[T](key: String)(implicit format: Format[T]): Future[DocumentResponse[T]] = {
     val docObservable = bucket.async().get(key, classOf[RawJsonDocument])
     convertToEntity[T](docObservable)
   }
+
+  /**
+    * renews the expiration time of a document by key
+    *
+    * The returned {@link Observable} can error under the following conditions:
+    *
+    * - The document doesn't exist: {@link DocumentDoesNotExistException}
+    * - The producer outpaces the SDK: {@link BackpressureException}
+    * - The operation had to be cancelled while on the wire or the retry strategy cancelled it instead of
+    * retrying: {@link RequestCancelledException}
+    * - The server is currently not able to process the request, retrying may help: {@link TemporaryFailureException}
+    * - The server is out of memory: {@link CouchbaseOutOfMemoryException}
+    * - Unexpected errors are caught and contained in a generic {@link CouchbaseException}.
+    *
+    * @param key
+    * @param exp the new expiration time. 0 means no expiry.
+    * @tparam T
+    * @return
+    */
+  def touchByKey[T](key: String, exp: Int = 0): Future[Boolean] = {
+    val docObservable = bucket.async().touch(key, exp)
+    observableToFuture(docObservable).map(boolean2Boolean(_))
+  }
+
 
   def binaryLookupByKey(key: String): Future[DocumentResponse[ByteString]] = {
     val p = Promise[DocumentResponse[ByteString]]()
@@ -281,11 +304,11 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Retrieve a list of keys in Couchbase using the batch async system
+    * Retrieve a list of keys in Couchbase using the batch async system
     *
     * @param keys The list of keys to retrieve
-   * @return A Source of RawJsonDocuments
-   */
+    * @return A Source of RawJsonDocuments
+    */
   def batchLookupByKey[T](keys: List[String])
                          (implicit format: Format[T]):
   Source[DocumentResponse[T], Any] = {
@@ -295,18 +318,46 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Does a batch update of keys -> each update
-   * Throws a DocumentNotFound exception if all of the keys for the batch updates cannot be found
-   * @param entities Seqence of UpdateObject to update
-   * @return a Future source of entities from the batch update request
-   */
+    *  renews the expiration time of a document by keys
+    *
+    * The returned {@link Observable} can error under the following conditions:
+    *
+    * - The document doesn't exist: {@link DocumentDoesNotExistException}
+    * - The producer outpaces the SDK: {@link BackpressureException}
+    * - The operation had to be cancelled while on the wire or the retry strategy cancelled it instead of
+    * retrying: {@link RequestCancelledException}
+    * - The server is currently not able to process the request, retrying may help: {@link TemporaryFailureException}
+    * - The server is out of memory: {@link CouchbaseOutOfMemoryException}
+    * - Unexpected errors are caught and contained in a generic {@link CouchbaseException}.
+    *
+    * @param keys
+    * @param exp the new expiration time. 0 means no expiry.
+    * @param format
+    * @tparam T
+    * @return
+    */
+  def batchTouchByKey[T](keys: List[String], exp: Int)
+                         (implicit format: Format[T]): Source[Boolean, Any] = {
+    val docObservable = Observable
+      .from(keys)
+      .flatMap(key => bucket.async().touch(key, exp))
+
+    observableToSource(docObservable).map(boolean2Boolean(_))
+  }
+
+  /**
+    * Does a batch update of keys -> each update
+    * Throws a DocumentNotFound exception if all of the keys for the batch updates cannot be found
+    * @param entities Seqence of UpdateObject to update
+    * @return a Future source of entities from the batch update request
+    */
   def batchUpdate[T](entities: Seq[UpdateObject[T]])(implicit format: Format[T]): Future[Source[DocumentResponse[T], Any]] = {
-    val lookupSource = batchLookupByKey[T](entities.map{e => e.key}.toList)
-    lookupSource.grouped(entities.length).runWith(Sink.head).map{res =>
+    val lookupSource = batchLookupByKey[T](entities.map { e => e.key }.toList)
+    lookupSource.grouped(entities.length).runWith(Sink.head).map { res =>
       val Expected = entities.length
       res.length match {
         case Expected =>
-          val observableSeq = entities.map{e =>
+          val observableSeq = entities.map { e =>
             val replacement = RawJsonDocument.create(e.key, marshalEntity[T](e.entity), e.cas)
             bucket.async().replace(replacement)
           }
@@ -320,11 +371,11 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
 
 
   /**
-   * Remove a document from the database
+    * Remove a document from the database
     *
     * @param key The document to remove
-   * @return A Successful future if the document was found, otherwise a Failure
-   */
+    * @return A Successful future if the document was found, otherwise a Failure
+    */
   def removeByKey(key: String): Future[JsonDocument] = {
     val p = Promise[JsonDocument]()
     val removedObservable = bucket.async().remove(key)
@@ -337,12 +388,12 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Extract an entity of type T from an AsyncViewRow
+    * Extract an entity of type T from an AsyncViewRow
     *
     * @param row The AyncViewRow to extract the entity from
-   * @tparam T The type of the entity to unmarshal from the row
-   * @return The unmarshalled entity if successful
-   */
+    * @tparam T The type of the entity to unmarshal from the row
+    * @return The unmarshalled entity if successful
+    */
   def getEntityFromRow[T](row: AsyncViewRow)
                          (implicit format: Format[T]):
   Future[DocumentResponse[T]] = {
@@ -367,15 +418,15 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Query the designDoc/viewDoc for the given key, and return the resulting row if found
+    * Query the designDoc/viewDoc for the given key, and return the resulting row if found
     *
     * @param designDoc The design document containing the view
-   * @param viewDoc The view to query
-   * @param key The key to lookup in the query
-   * @param forceIndex Set to true to force the view index to update on request. This should be used carefully
-   * @return The row containing the key if found
-   */
-  def indexQuerySingleElement(designDoc: String, viewDoc: String, key: String, forceIndex: Boolean=false):
+    * @param viewDoc The view to query
+    * @param key The key to lookup in the query
+    * @param forceIndex Set to true to force the view index to update on request. This should be used carefully
+    * @return The row containing the key if found
+    */
+  def indexQuerySingleElement(designDoc: String, viewDoc: String, key: String, forceIndex: Boolean = false):
   Future[Option[AsyncViewRow]] = {
     val staleState = if (forceIndex) Stale.FALSE else Stale.TRUE
     val rowFuture = observableToFuture(
@@ -392,16 +443,16 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Query an index for multiple items
+    * Query an index for multiple items
     *
     * @param designDoc The design document name to query
-   * @param viewDoc The view in that design doc
-   * @param keys The list of keys to query for
-   * @param stale Allow potentially stale indexes or not
-   * @return Observable of AsyncViewRow
-   */
+    * @param viewDoc The view in that design doc
+    * @param keys The list of keys to query for
+    * @param stale Allow potentially stale indexes or not
+    * @return Observable of AsyncViewRow
+    */
   def indexQuery(designDoc: String, viewDoc: String, keys: List[String] = List(), stale: Stale = Stale.FALSE,
-                limit: Int = Int.MaxValue, skip: Int = 0): Observable[AsyncViewRow] = {
+                 limit: Int = Int.MaxValue, skip: Int = 0): Observable[AsyncViewRow] = {
     // Couchbase needs a java.util.List
     val keyList: java.util.List[String] = keys
     val query =
@@ -423,14 +474,14 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Query an index with a compound key
+    * Query an index with a compound key
     *
     * @param designDoc The name of the design document
-   * @param viewDoc The name of the view
-   * @param keys A List of lists to query for
-   * @param stale Allow stale records
-   * @return Observable of AsyncViewRows
-   */
+    * @param viewDoc The name of the view
+    * @param keys A List of lists to query for
+    * @param stale Allow stale records
+    * @return Observable of AsyncViewRows
+    */
   def compoundIndexQuery(designDoc: String, viewDoc: String, keys: Option[List[List[Any]]] = None,
                          startKey: Option[Seq[Any]] = None, endKey: Option[Seq[Any]] = None,
                          stale: Stale = Stale.FALSE, limit: Int = Int.MaxValue, skip: Int = 0): Observable[AsyncViewRow] = {
@@ -460,8 +511,8 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   def paginatedIndexQuery[T](designDoc: String, viewDoc: String, startKey: Seq[Any], endKey: Seq[Any],
-                          startDocId: Option[String] = None, stale: Stale = Stale.FALSE, limit: Int = 100)
-                         (implicit format: Format[T]): Future[ViewQueryResponse[T]] = {
+                             startDocId: Option[String] = None, stale: Stale = Stale.FALSE, limit: Int = 100)
+                            (implicit format: Format[T]): Future[ViewQueryResponse[T]] = {
     if (startKey.length != endKey.length) throw new IllegalArgumentException("startKey and endKey must be the same length")
     val query = ViewQuery
       .from(designDoc, viewDoc)
@@ -486,28 +537,28 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Get the documents found from an Observable[AsyncViewRow]
+    * Get the documents found from an Observable[AsyncViewRow]
     *
     * @param docObservable An Observable[AsyncViewRow] as the list of documents
-   * @return A new Observable[RawJsonDocument]
-   */
+    * @return A new Observable[RawJsonDocument]
+    */
   def withDocuments(docObservable: rx.lang.scala.Observable[AsyncViewRow]): Observable[RawJsonDocument] = {
     docObservable.flatMap(_.document(classOf[RawJsonDocument]))
   }
 
 
   /**
-   * Query an index and unmarshal the found documents into an entity of type T
+    * Query an index and unmarshal the found documents into an entity of type T
     *
     * @param designDoc The name of the design document to query
-   * @param viewDoc The name of the view
-   * @param keys The keys to query for
-   * @param stale Allow stale records or not
-   * @tparam T The entity type to unmarshal to
-   * @return A Source[T, Any] of the found documents.
-   */
+    * @param viewDoc The name of the view
+    * @param keys The keys to query for
+    * @param stale Allow stale records or not
+    * @tparam T The entity type to unmarshal to
+    * @return A Source[T, Any] of the found documents.
+    */
   def indexQueryToEntity[T](designDoc: String, viewDoc: String, keys: List[String] = List(), stale: Stale = Stale.FALSE,
-                           limit: Int = Int.MaxValue, skip: Int = 0)
+                            limit: Int = Int.MaxValue, skip: Int = 0)
                            (implicit format: Format[T]): Source[DocumentResponse[T], Any] = {
     val query = indexQuery(designDoc, viewDoc, keys, stale, limit, skip)
     val docs = withDocuments(query)
@@ -515,18 +566,18 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Query a compound index by a set of keys and unmarshal the found documents into an entity of type T
-   *
-   * @param designDoc The name of the design document
-   * @param viewDoc The name of the view
-   * @param keys The list of keys to query for, where each compound key is a list of keys
-   * @param stale Allow stale records or not
-   * @tparam T The type of the entity to unmarshal to
-   * @return A Source[T, Any] of the found documents.
-   */
+    * Query a compound index by a set of keys and unmarshal the found documents into an entity of type T
+    *
+    * @param designDoc The name of the design document
+    * @param viewDoc The name of the view
+    * @param keys The list of keys to query for, where each compound key is a list of keys
+    * @param stale Allow stale records or not
+    * @tparam T The type of the entity to unmarshal to
+    * @return A Source[T, Any] of the found documents.
+    */
   def compoundIndexQueryByKeysToEntity[T](designDoc: String, viewDoc: String, keys: Option[List[List[Any]]] = None,
-                                    stale: Stale = Stale.FALSE, limit: Int = Int.MaxValue, skip: Int = 0)
-                                   (implicit format: Format[T]):
+                                          stale: Stale = Stale.FALSE, limit: Int = Int.MaxValue, skip: Int = 0)
+                                         (implicit format: Format[T]):
   Source[DocumentResponse[T], Any] = {
     val query = compoundIndexQuery(designDoc, viewDoc, keys, None, None, stale, limit, skip)
     val docs = withDocuments(query)
@@ -534,17 +585,17 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
-   * Query a compound index with a start & end range and unmarshal the results
-   * @param designDoc The name of the design document
-   * @param viewDoc The name of the view
-   * @param startKey compound start key range, optional
-   * @param endKey compound end key range, optional
-   * @param stale Allow stale records or not
-   * @param limit number of results to check, defaults to Int.Max
-   * @param skip number of results to skip, defaults to 0
-   * @tparam T type of entity to unmarshall to
-   * @return A Source[T, Any] of the found documents.
-   */
+    * Query a compound index with a start & end range and unmarshal the results
+    * @param designDoc The name of the design document
+    * @param viewDoc The name of the view
+    * @param startKey compound start key range, optional
+    * @param endKey compound end key range, optional
+    * @param stale Allow stale records or not
+    * @param limit number of results to check, defaults to Int.Max
+    * @param skip number of results to skip, defaults to 0
+    * @tparam T type of entity to unmarshall to
+    * @return A Source[T, Any] of the found documents.
+    */
   def compoundIndexQueryByRangeToEntity[T](designDoc: String, viewDoc: String, startKey: Option[Seq[Any]] = None,
                                            endKey: Option[Seq[Any]] = None, stale: Stale = Stale.FALSE,
                                            limit: Int = Int.MaxValue, skip: Int = 0)
@@ -559,8 +610,8 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     * Query couchbase using the N1QL interface. There must be an index created on the bucket for this to succeed.
     *
     * Comment: This is a leaky abstraction around the Couchbase N1QL interface, but it didn't seem worth it to
-    *          attempt to re-create their query DSL. An alternative is to just accept strings for queries, but
-    *          that doesn't seem like a better solution either.
+    * attempt to re-create their query DSL. An alternative is to just accept strings for queries, but
+    * that doesn't seem like a better solution either.
     *
     * @param q The query statement to execute. You *MUST* select meta().cas
     * @param params Optional query parameters for N1QL. Most important is the .adhoc() option, which should always be set to
@@ -572,7 +623,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     val query = N1qlQuery.simple(q, params)
     val resultObservable = bucket.async().query(query)
     val observable = toScalaObservable(resultObservable)
-      .map{ queryResult =>
+      .map { queryResult =>
         RawQueryResponse(
           observableToSource[AsyncN1qlQueryRow](queryResult.rows()),
           status = observableToFuture[String](queryResult.status()),
@@ -589,8 +640,8 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     * otherwise it is not possible to convert the resulting rows into T (since they will be missing fields).
     *
     * Comment: This is a leaky abstraction around the Couchbase N1QL interface, but it didn't seem worth it to
-    *          attempt to re-create their query DSL. An alternative is to just accept strings for queries, but
-    *          that doesn't seem like a better solution either.
+    * attempt to re-create their query DSL. An alternative is to just accept strings for queries, but
+    * that doesn't seem like a better solution either.
     *
     * @param where The expressing selecting which records to return.
     * @param order The order to return the records, and the field to sort by
@@ -614,16 +665,18 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
       .offset(offset)
     val q = N1qlQuery.simple(s, params)
     val observable = toScalaObservable(bucket.async().query(q))
-      .map{ queryResult => QueryResponse[T](
+      .map { queryResult => QueryResponse[T](
         rows = observableToSource[AsyncN1qlQueryRow](queryResult.rows())
-          .map{ row =>
+          .map { row =>
             val cas = row.value().getLong("cas")
             val entity = Json.parse(row.value().getObject(bucketName).toString).as[T]
-            DocumentResponse[T](cas, entity)},
+            DocumentResponse[T](cas, entity)
+          },
         status = observableToFuture[String](queryResult.status()),
         errors = observableToFuture(queryResult.errors()),
         info = observableToFuture[N1qlMetrics](queryResult.info())
-      )}
+      )
+      }
     observableToFuture[QueryResponse[T]](observable)
   }
 
@@ -656,15 +709,17 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   def n1qlParameterizedQueryToEntity[T](query: ParameterizedN1qlQuery)
                                        (implicit format: Format[T]): Future[QueryResponse[T]] = {
     observableToFuture(bucket.async().query(query))
-      .map{ queryResult => QueryResponse[T](
+      .map { queryResult => QueryResponse[T](
         rows = observableToSource[AsyncN1qlQueryRow](queryResult.rows())
-          .map{ row =>
+          .map { row =>
             val cas = row.value().getLong("cas")
             val entity = Json.parse(row.value().getObject(bucketName).toString).as[T]
-            DocumentResponse[T](cas, entity)},
+            DocumentResponse[T](cas, entity)
+          },
         status = observableToFuture[String](queryResult.status()),
         errors = observableToFuture(queryResult.errors()),
         info = observableToFuture[N1qlMetrics](queryResult.info())
-      )}
+      )
+      }
   }
 }
