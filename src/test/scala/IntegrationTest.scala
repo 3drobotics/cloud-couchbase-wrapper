@@ -118,6 +118,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
   clusterManager.insertBucket(bucketSettings)
 
   override def afterAll() {
+    couchbase.bucket.close()
     clusterManager.removeBucket(testBucketName)
   }
 
