@@ -1,8 +1,8 @@
-name := "couchbasestreamswrapper"
+name := "couchbase-streams-wrapper"
 
-organization := "io.dronekit"
+organization := "io.outofaxis"
 
-version := "2.4.1"
+version := "1.0.0"
 
 scalaVersion := "2.11.8"
 
@@ -24,3 +24,14 @@ libraryDependencies ++= {
     "org.scalatest" %% "scalatest" % scalaTestV % "test"
   )
 }
+
+publishTo := {
+  val nexus = "http://taxitube.ge:8081/nexus/"
+  if (version.value.trim.endsWith("SNAPSHOT"))
+    Some("snapshots" at nexus + "content/repositories/snapshots")
+  else
+    Some("releases"  at nexus + "content/repositories/releases")
+}
+
+credentials += Credentials("Sonatype Nexus Repository Manager", "taxitube.ge", "admin", "F9bz4Nx3rwul")
+
