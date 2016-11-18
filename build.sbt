@@ -2,7 +2,7 @@ name := "couchbase-streams-wrapper"
 
 organization := "io.outofaxis"
 
-version := "1.0.0"
+version := "1.0.1"
 
 scalaVersion := "2.11.8"
 

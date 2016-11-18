@@ -318,6 +318,21 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   }
 
   /**
+    * Retrieve a list of keys in Couchbase using the batch async system
+    *
+    * @param keys The list of keys to retrieve
+    * @return A Source of RawJsonDocuments
+    */
+  def batchRemoveByKey[T](keys: List[String])(implicit format: Format[T]):
+  Source[Future[JsonDocument], Any] = {
+   val docObservable = Observable.from(keys).map(key => removeByKey(key))
+    observableToSource(docObservable)
+  }
+
+
+
+
+  /**
     *  renews the expiration time of a document by keys
     *
     * The returned {@link Observable} can error under the following conditions:

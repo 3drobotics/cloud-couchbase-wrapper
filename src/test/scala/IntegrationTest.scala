@@ -8,6 +8,7 @@ import akka.util.ByteString
 import com.couchbase.client.java.{CouchbaseCluster, PersistTo}
 import com.couchbase.client.java.bucket.{BucketFlusher, BucketType}
 import com.couchbase.client.java.cluster.DefaultBucketSettings
+import com.couchbase.client.java.document.JsonDocument
 import com.couchbase.client.java.error.{CASMismatchException, DocumentDoesNotExistException}
 import com.couchbase.client.java.query.Select._
 import com.couchbase.client.java.query.consistency.ScanConsistency
@@ -21,7 +22,6 @@ import io.dronekit.{CouchbaseStreamsWrapper, DocumentNotFound, UpdateObject}
 import org.joda.time.DateTime
 import org.joda.time.DateTimeZone.UTC
 import org.scalatest._
-
 import play.api.libs.json._
 import play.api.libs.json.Reads._
 import play.api.libs.json.Writes._
@@ -35,7 +35,9 @@ import scala.languageFeature.postfixOps
 import scala.util.Random
 
 
-trait TestTrait{ val doc: String }
+trait TestTrait {
+  val doc: String
+}
 
 case class TestEntity(id: String = UUID.randomUUID().toString,
                       name: String, age: Long, sex: Option[String],
@@ -44,14 +46,14 @@ case class TestEntity(id: String = UUID.randomUUID().toString,
                       doc: String = "TestEntity") extends TestTrait
 
 case class OtherTestEntity(id: String = UUID.randomUUID().toString,
-                            name: String, location: String,
-                            cas: Option[Long] = None,
-                            doc: String = "OtherTestEntity") extends TestTrait
+                           name: String, location: String,
+                           cas: Option[Long] = None,
+                           doc: String = "OtherTestEntity") extends TestTrait
 
 
 class Protocol {
 
-  implicit val dateTimeFormat  = new Format[DateTime] {
+  implicit val dateTimeFormat = new Format[DateTime] {
 
     override def reads(json: JsValue): JsResult[DateTime] = {
       JsSuccess(DateTime.parse(json.as[String]))
@@ -93,12 +95,13 @@ class Protocol {
 
 
 /**
- * Created by Jason Martens on 9/25/15.
- *
- * Integration test class for CouchbaseStreamsWrapper, requires a running Couchbase instance
- */
+  * Created by Jason Martens on 9/25/15.
+  *
+  * Integration test class for CouchbaseStreamsWrapper, requires a running Couchbase instance
+  */
 class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
   val p = new Protocol()
+
   import p._
 
   val cluster = CouchbaseCluster.create(CouchbaseStreamsWrapper.env, "127.0.0.1")
@@ -121,7 +124,6 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
     couchbase.bucket.close()
     clusterManager.removeBucket(testBucketName)
   }
-
 
 
   implicit val system: ActorSystem = ActorSystem()
@@ -214,13 +216,28 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
     }
   }
 
-  "Should remove documents by ID" in {
+  "Should batch remove documents by ID" in {
     val entity = TestEntity(name = "Jack", age = 3, sex = Some("Male"))
     val insertFuture = couchbase.insertDocument[TestEntity](entity, entity.id)
     val result = Await.result(insertFuture, 10 seconds)
     result should not be None
     val removeFuture = couchbase.removeByKey(entity.id)
     Await.ready(removeFuture, 10 seconds)
+  }
+
+  "Should remove documents by ID" in {
+    val personOne = TestEntity(name = "Bonnie", age = 25, sex = Some("Female"))
+    val personTwo = TestEntity(name = "Clyde", age = 24, sex = Some("Male"))
+    val f1 = couchbase.insertDocument[TestEntity](personOne, personOne.id)
+    val f2 = couchbase.insertDocument[TestEntity](personTwo, personTwo.id)
+    Await.ready(f1 zip f2, 10 seconds)
+
+    val removeFuture = couchbase.batchRemoveByKey(List(personOne.id, personTwo.id))(otherTestEntityFormat)
+
+    removeFuture
+      .runWith(TestSink.probe[Future[JsonDocument]])
+      .request(2)
+      .expectNextN(2)
   }
 
   "Should throw an error if removing a non-existing document" in {
@@ -296,8 +313,9 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
     val person = TestEntity(name = "Emily Haines", age = 41, sex = Some("Female"))
     Await.ready(couchbase.insertDocument[TestEntity](person, person.id), 10 seconds)
     val rowFuture = couchbase.indexQuerySingleElement("NameDoc", "ByName", person.name, forceIndex = true).flatMap {
-        case Some(asyncRow) => couchbase.getEntityFromRow[TestEntity](asyncRow)
-        case None => throw new DocumentDoesNotExistException()}
+      case Some(asyncRow) => couchbase.getEntityFromRow[TestEntity](asyncRow)
+      case None => throw new DocumentDoesNotExistException()
+    }
     val rowResult = Await.result(rowFuture, 10 seconds)
     rowResult.entity shouldBe person
   }
@@ -322,16 +340,16 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
     val f2 = couchbase.insertDocument[OtherTestEntity](otherPersonTwo, otherPersonTwo.id)
     val insertResults = Await.ready(f1 zip f2, 10 seconds)
 
-    insertResults.map{ case (p1, p2) =>
+    insertResults.map { case (p1, p2) =>
       val updateOne = personOne.copy(age = 5)
-      val updateTwo = otherPersonTwo.copy(location="Oakland")
+      val updateTwo = otherPersonTwo.copy(location = "Oakland")
       val updateSeq: Seq[UpdateObject[TestTrait]] = Seq(UpdateObject[TestTrait](key = personOne.id, cas = p1.cas, entity = updateOne), UpdateObject[TestTrait](key = otherPersonTwo.id, cas = p2.cas, entity = updateTwo))
 
       val sourceFut = couchbase.batchUpdate[TestTrait](updateSeq)
       val source = Await.result(sourceFut, 10 seconds)
       val results = Await.result(source.grouped(2).runWith(Sink.head), 10 seconds)
-      results.find{r => r.entity.doc == "TestEntity"}.get.entity.asInstanceOf[TestEntity] shouldBe updateOne
-      results.find{r => r.entity.doc == "OtherTestEntity"}.get.entity.asInstanceOf[OtherTestEntity] shouldBe updateTwo
+      results.find { r => r.entity.doc == "TestEntity" }.get.entity.asInstanceOf[TestEntity] shouldBe updateOne
+      results.find { r => r.entity.doc == "OtherTestEntity" }.get.entity.asInstanceOf[OtherTestEntity] shouldBe updateTwo
     }
   }
 
@@ -346,9 +364,9 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
     val f3 = couchbase.insertDocument[TestEntity](personFour, personFour.id)
 
     val aggFut = for {
-      f1res <-f1
-      f2res <-f2
-      f3res <-f3
+      f1res <- f1
+      f2res <- f2
+      f3res <- f3
     } yield (f1res.cas, f2res.cas, f3res.cas)
     val casRes = Await.result(aggFut, 10 seconds)
 
@@ -356,8 +374,8 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
     val updateSeq: Seq[UpdateObject[TestTrait]] = Seq(
       UpdateObject[TestTrait](key = personOne.id, cas = casRes._1, entity = updateOne),
       UpdateObject[TestTrait](key = "some-bad-key", cas = 123, entity = personTwo),
-      UpdateObject[TestTrait](key = personThree.id, cas = casRes._2, entity = personThree.copy(age=6)),
-      UpdateObject[TestTrait](key = personFour.id, cas = casRes._3, entity = personFour.copy(age=7)))
+      UpdateObject[TestTrait](key = personThree.id, cas = casRes._2, entity = personThree.copy(age = 6)),
+      UpdateObject[TestTrait](key = personFour.id, cas = casRes._3, entity = personFour.copy(age = 7)))
 
     val sourceFut = couchbase.batchUpdate[TestTrait](updateSeq)
     intercept[DocumentNotFound] {
@@ -444,10 +462,10 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
         stale = Stale.FALSE
       ), 10 seconds)
       val rows = Await.result(queryResponse.rows.grouped(100).runWith(Sink.head), 10 seconds)
-          // Yuck... This should not be necessary at all, however somewhere between the query
-          // to couchbase and the runWith above, the rows can get out of order (which should not happen!)
-          // Need to investigate the root cause of this but don't have time to now.
-          .sortBy(doc => doc.entity.birthday.get.getMillis)
+        // Yuck... This should not be necessary at all, however somewhere between the query
+        // to couchbase and the runWith above, the rows can get out of order (which should not happen!)
+        // Need to investigate the root cause of this but don't have time to now.
+        .sortBy(doc => doc.entity.birthday.get.getMillis)
       rows.length shouldBe 10
       rows.foreach { docResponse =>
         assert(docResponse.entity.birthday.get.getMillis > lastDateTime.getMillis, s"${docResponse.entity} is out of order with $lastDateTime")
