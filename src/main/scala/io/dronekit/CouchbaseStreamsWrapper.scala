@@ -449,11 +449,11 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     }
 
     if (startKey.nonEmpty) {
-      query = query.startKey(JsonArray.from(startKey.get))
+      query = query.startKey(JsonArray.from(startKey.get.asJava))
     }
 
     if (endKey.nonEmpty) {
-      query = query.endKey(JsonArray.from(endKey.get))
+      query = query.endKey(JsonArray.from(endKey.get.asJava))
     }
 
     toScalaObservable(bucket.async().query(query))
@@ -464,11 +464,12 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
                           startDocId: Option[String] = None, stale: Stale = Stale.FALSE, limit: Int = 100)
                          (implicit format: JsonFormat[T]): Future[ViewQueryResponse[T]] = {
     if (startKey.length != endKey.length) throw new IllegalArgumentException("startKey and endKey must be the same length")
+
     val query = ViewQuery
       .from(designDoc, viewDoc)
       .stale(stale)
-      .startKey(JsonArray.from(startKey))
-      .endKey(JsonArray.from(endKey))
+      .startKey(JsonArray.from(startKey.asJava))
+      .endKey(JsonArray.from(endKey.asJava))
       .startKeyDocId(startDocId.getOrElse(""))
       .limit(limit)
       .skip(if (startDocId.isDefined) 1 else 0)
