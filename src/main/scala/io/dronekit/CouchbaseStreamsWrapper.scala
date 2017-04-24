@@ -30,7 +30,7 @@ import rx.lang.scala.JavaConversions.{toJavaObservable, toScalaObservable}
 import rx.lang.scala.Observable
 import spray.json.{DefaultJsonProtocol, _}
 
-import scala.collection.JavaConversions._
+import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
@@ -155,7 +155,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
    * @return An Akka-Streams Source
    */
   private def observableToSource[T](observable: rx.lang.scala.Observable[T]): Source[T, Any] = {
-    Source.fromPublisher(RxReactiveStreams.toPublisher(observable))
+    Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(observable)))
   }
 
   /**
@@ -404,7 +404,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   def indexQuery(designDoc: String, viewDoc: String, keys: List[String] = List(), stale: Stale = Stale.FALSE,
                 limit: Int = Int.MaxValue, skip: Int = 0): Observable[AsyncViewRow] = {
     // Couchbase needs a java.util.List
-    val keyList: java.util.List[String] = keys
+    val keyList: java.util.List[String] = keys.asJava
     val query =
       if (keys.isEmpty)
         ViewQuery.from(designDoc, viewDoc)
@@ -444,16 +444,16 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
       .skip(skip)
 
     if (keys.nonEmpty) {
-      val keyList: java.util.List[java.util.List[Any]] = keys.get.map(seqAsJavaList)
+      val keyList: java.util.List[java.util.List[Any]] = keys.get.map(_.asJava).asJava
       query = query.keys(JsonArray.from(keyList))
     }
 
     if (startKey.nonEmpty) {
-      query = query.startKey(JsonArray.from(seqAsJavaList(startKey.get)))
+      query = query.startKey(JsonArray.from(startKey.get.asJava))
     }
 
     if (endKey.nonEmpty) {
-      query = query.endKey(JsonArray.from(seqAsJavaList(endKey.get)))
+      query = query.endKey(JsonArray.from(endKey.get.asJava))
     }
 
     toScalaObservable(bucket.async().query(query))
@@ -464,11 +464,12 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
                           startDocId: Option[String] = None, stale: Stale = Stale.FALSE, limit: Int = 100)
                          (implicit format: JsonFormat[T]): Future[ViewQueryResponse[T]] = {
     if (startKey.length != endKey.length) throw new IllegalArgumentException("startKey and endKey must be the same length")
+
     val query = ViewQuery
       .from(designDoc, viewDoc)
       .stale(stale)
-      .startKey(JsonArray.from(seqAsJavaList(startKey)))
-      .endKey(JsonArray.from(seqAsJavaList(endKey)))
+      .startKey(JsonArray.from(startKey.asJava))
+      .endKey(JsonArray.from(endKey.asJava))
       .startKeyDocId(startDocId.getOrElse(""))
       .limit(limit)
       .skip(if (startDocId.isDefined) 1 else 0)
@@ -512,7 +513,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
                            (implicit format: JsonFormat[T]): Source[DocumentResponse[T], Any] = {
     val query = indexQuery(designDoc, viewDoc, keys, stale, limit, skip)
     val docs = withDocuments(query)
-    Source.fromPublisher(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
+    Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(docs))).map(convertToEntity[T])
   }
 
   /**
@@ -531,7 +532,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   Source[DocumentResponse[T], Any] = {
     val query = compoundIndexQuery(designDoc, viewDoc, keys, None, None, stale, limit, skip)
     val docs = withDocuments(query)
-    Source.fromPublisher(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
+    Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(docs))).map(convertToEntity[T])
   }
 
   /**
@@ -553,7 +554,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   Source[DocumentResponse[T], Any] = {
     val query = compoundIndexQuery(designDoc, viewDoc, None, startKey, endKey, stale, limit, skip)
     val docs = withDocuments(query)
-    Source.fromPublisher(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
+    Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(docs))).map(convertToEntity[T])
   }
 
   /**
