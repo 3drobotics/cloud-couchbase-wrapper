@@ -241,6 +241,26 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     convertToEntity[T](insertObservable)
   }
 
+
+  /**
+    * Marshall entity to json, insert it into the database, then unmarshal the response and return it
+    *
+    * @param entity The object to insert
+    * @param key The location to insert it to
+    * @param expiry optional expiry time in seconds, 0 (stored indefinitely) if not set
+    * @tparam T The type of the object
+    * @return The resulting document after it has been inserted
+    */
+  def upsertDocument[T](entity: T, key: String, expiry: Int = 0,
+                        persist: PersistTo = PersistTo.NONE, replicate: ReplicateTo = ReplicateTo.NONE)
+                       (implicit format: Format[T]): Future[DocumentResponse[T]] = {
+    val jsonString = marshalEntity[T](entity)
+    val doc = RawJsonDocument.create(key, expiry, jsonString)
+    val insertObservable = bucket.async().upsert(doc)
+    convertToEntity[T](insertObservable)
+  }
+
+
   /**
     * Lookup a document in couchbase by the key, and unmarshal it into an object: T
     *
@@ -316,6 +336,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
       .flatMap(key => bucket.async().get(key, classOf[RawJsonDocument]))
     observableToSource(docObservable).map(json => convertToEntity[T](json))
   }
+
 
   /**
     * Retrieve a list of keys in Couchbase using the batch async system

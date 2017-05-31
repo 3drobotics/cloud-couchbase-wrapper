@@ -169,6 +169,16 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
     result.entity shouldBe entity
   }
 
+  "Should be able to upsert and retrieve a document a new doc" in {
+    val entity = TestEntity(name = "Jill2", age = 23, sex = None)
+    val insertFuture = couchbase.upsertDocument[TestEntity](entity, entity.id)
+    Await.ready(insertFuture, 10 seconds)
+    val getFuture = couchbase.lookupByKey[TestEntity](entity.id)
+    val result = Await.result(getFuture, 10 seconds)
+    result.cas should not be 0
+    result.entity shouldBe entity
+  }
+
   "Should be able to insert expiring document and touch" in {
     val entity = TestEntity(name = "Jill", age = 23, sex = None)
     val insertFuture = couchbase.insertDocument[TestEntity](entity, entity.id, 555)
