@@ -2,15 +2,15 @@ name := "couchbase-streams-wrapper"
 
 organization := "io.outofaxis"
 
-version := "1.0.3-SNAPSHOT"
+version := "1.0.4-SNAPSHOT"
 
-scalaVersion := "2.11.8"
+scalaVersion := "2.11.11"
 
 scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8", "-feature", "-language:postfixOps")
 
 libraryDependencies ++= {
   val scalaTestV = "3.0.0"
-  val akkaV = "2.4.11"
+  val akkaV = "2.5.3"
   Seq(
     "com.typesafe.akka" %% "akka-stream" % akkaV,
     "com.typesafe.akka" %% "akka-stream-testkit" % akkaV,
@@ -19,7 +19,7 @@ libraryDependencies ++= {
     "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0",
     "com.couchbase.client" % "java-client" % "2.3.4",
     "io.reactivex" % "rxjava-reactive-streams" % "1.0.1",
-    "io.reactivex" %% "rxscala" % "0.26.1",
+    "io.reactivex" %% "rxscala" % "0.26.5",
     "com.github.nscala-time" %% "nscala-time" % "2.14.0",
     "org.scalatest" %% "scalatest" % scalaTestV % "test"
   )
