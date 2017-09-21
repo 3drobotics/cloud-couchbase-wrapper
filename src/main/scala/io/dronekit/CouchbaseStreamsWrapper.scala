@@ -6,13 +6,14 @@ package io.dronekit
  */
 
 import java.util.NoSuchElementException
-
+import java.util.concurrent.TimeUnit
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Sink, Source}
 import akka.util.ByteString
 import com.couchbase.client.deps.io.netty.buffer._
 import com.couchbase.client.deps.io.netty.util.ReferenceCountUtil
-import com.couchbase.client.java.{ReplicateTo, PersistTo, CouchbaseCluster}
+import com.couchbase.client.java.{ReplicateTo, PersistTo, CouchbaseCluster, Bucket}
+import com.couchbase.client.java.util.retry.RetryBuilder
 import com.couchbase.client.java.document.json.{JsonArray, JsonObject}
 import com.couchbase.client.java.document.{BinaryDocument, JsonDocument, RawJsonDocument}
 import com.couchbase.client.java.env.DefaultCouchbaseEnvironment
@@ -21,6 +22,8 @@ import com.couchbase.client.java.query._
 import com.couchbase.client.java.query.dsl.Expression._
 import com.couchbase.client.java.query.dsl.{Expression, Sort}
 import com.couchbase.client.java.view.{AsyncViewRow, Stale, ViewQuery}
+import com.couchbase.client.java.error.TemporaryFailureException
+import com.couchbase.client.core.time.Delay
 import com.typesafe.scalalogging.Logger
 import org.joda.time.DateTime
 import org.joda.time.DateTimeZone.UTC
@@ -29,6 +32,7 @@ import rx.RxReactiveStreams
 import rx.lang.scala.JavaConversions.{toJavaObservable, toScalaObservable}
 import rx.lang.scala.Observable
 import spray.json.{DefaultJsonProtocol, _}
+import java.lang.Thread
 
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -107,6 +111,9 @@ object CouchbaseStreamsWrapper {
     * The compound key is composed of year, month, day, hour, minute, second
     */
   val DateEndKey = Seq[Int](9999, 99, 99, 99, 99, 99)
+
+  val temporaryFailureRetryMs = 50
+  val temporaryFailureMaxRetries = 5
 }
 
 
@@ -224,6 +231,15 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     convertToEntity[T](replaceObservable)
   }
 
+  def insertDocumentWithBackoff(bucket: Bucket,  document: RawJsonDocument): Observable[RawJsonDocument] = {
+
+    val delay = Delay.exponential(TimeUnit.MILLISECONDS, CouchbaseStreamsWrapper.temporaryFailureRetryMs)
+    bucket.async().insert(document)
+      .retryWhen(RetryBuilder.anyOf(classOf[TemporaryFailureException])
+        .delay(delay)
+        .max(CouchbaseStreamsWrapper.temporaryFailureMaxRetries)
+        .build())
+  }
 
   /**
    * Marshall entity to json, insert it into the database, then unmarshal the response and return it
@@ -239,7 +255,7 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
                        (implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
     val jsonString = marshalEntity[T](entity)
     val doc = RawJsonDocument.create(key, expiry, jsonString)
-    val insertObservable = bucket.async().insert(doc)
+    val insertObservable = insertDocumentWithBackoff(bucket, doc)
     convertToEntity[T](insertObservable)
   }
 
