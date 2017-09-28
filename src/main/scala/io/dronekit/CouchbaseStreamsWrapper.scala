@@ -221,12 +221,14 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     *
     * @param entity Overwrite the document in the database with this entity
    * @param key The document to overwrite
+   * @param expiry optional expiry time in seconds, 0 (stored indefinitely) if not set
+   * @param cas compare-and-swap value
    * @tparam T The type of the entity
    * @return The replaced document in the database
    */
-  def replaceDocument[T](entity: T, key: String, cas: Long)(implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
+  def replaceDocument[T](entity: T, key: String, cas: Long, expiry: Int = 0)(implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
     val jsonString = marshalEntity[T](entity)
-    val doc = RawJsonDocument.create(key, jsonString, cas)
+    val doc = RawJsonDocument.create(key, expiry, jsonString, cas)
     val replaceObservable = bucket.async().replace(doc)
     convertToEntity[T](replaceObservable)
   }

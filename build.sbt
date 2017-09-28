@@ -2,7 +2,7 @@ name := "couchbasestreamswrapper"
 
 organization := "io.dronekit"
 
-version := "2.4.3"
+version := "2.4.4"
 
 scalaVersion := "2.12.2"
 crossScalaVersions := Seq("2.11.8", "2.12.2")
