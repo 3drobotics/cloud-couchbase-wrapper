@@ -2,7 +2,7 @@ name := "couchbase-streams-wrapper"
 
 organization := "io.outofaxis"
 
-version := "1.0.4-SNAPSHOT"
+version := "1.0.5-SNAPSHOT"
 
 scalaVersion := "2.11.11"
 
@@ -10,11 +10,11 @@ scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8", "-featur
 
 libraryDependencies ++= {
   val scalaTestV = "3.0.0"
-  val akkaV = "2.5.3"
+  val akkaV = "2.5.6"
   Seq(
     "com.typesafe.akka" %% "akka-stream" % akkaV,
     "com.typesafe.akka" %% "akka-stream-testkit" % akkaV,
-    "com.typesafe.play" %% "play-json" % "2.5.9",
+    "com.typesafe.play" %% "play-json" % "2.6.5",
     "ch.qos.logback" % "logback-classic" % "1.1.3",
     "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0",
     "com.couchbase.client" % "java-client" % "2.3.4",
@@ -26,12 +26,12 @@ libraryDependencies ++= {
 }
 
 publishTo := {
-  val nexus = "http://taxitube.ge:8081/nexus/"
+  val nexus = "http://pixelart.ge:8081/nexus/"
   if (version.value.trim.endsWith("SNAPSHOT"))
     Some("snapshots" at nexus + "content/repositories/snapshots")
   else
     Some("releases"  at nexus + "content/repositories/releases")
 }
 
-credentials += Credentials("Sonatype Nexus Repository Manager", "taxitube.ge", "admin", "F9bz4Nx3rwul")
+credentials += Credentials("Sonatype Nexus Repository Manager", "pixelart.ge", "admin", "F9bz4Nx3rwul")
 

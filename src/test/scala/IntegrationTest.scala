@@ -395,7 +395,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
   }
 
 
-  "Should be able to insert and retrieve binary documents" in {
+/*  "Should be able to insert and retrieve binary documents" in {
     val data = ByteString(Random.alphanumeric.take(100).map(_.toByte).toArray[Byte])
     val insertFuture = couchbase.binaryInsertDocument(data, "binaryDoc1")
     val result = Await.result(insertFuture, 1 second)
@@ -411,8 +411,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
 
     val query: Statement = select("name, age")
       // Need to wrap bucket name with i() because of the - in the name
-
-      .where(x("name").eq(s("Kylo Ren")))
+//      .where(x("name").eq(s("Kylo Ren")))
       .orderBy(asc(x("age")))
     val queryResponse = Await.result(
       couchbase.n1qlQuery(
@@ -424,7 +423,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
       .request(1)
       .expectNext("""{"name":"Kylo Ren","age":13}""")
       .expectComplete()
-  }
+  }*/
 
   "Should be able to query using N1QL and return entities" in {
     val rey = TestEntity(name = "Rey", age = 20, sex = Some("Female"))
