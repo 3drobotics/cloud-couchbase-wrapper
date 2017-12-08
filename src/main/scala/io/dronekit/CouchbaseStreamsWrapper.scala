@@ -221,16 +221,6 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     convertToEntity[T](replaceObservable)
   }
 
-  def insertDocumentWithBackoff(bucket: Bucket,  document: RawJsonDocument): Observable[RawJsonDocument] = {
-
-    val delay = Delay.exponential(TimeUnit.MILLISECONDS, CouchbaseStreamsWrapper.temporaryFailureRetryMs)
-    bucket.async().insert(document)
-      .retryWhen(RetryBuilder.anyOf(classOf[TemporaryFailureException])
-        .delay(delay)
-        .max(CouchbaseStreamsWrapper.temporaryFailureMaxRetries)
-        .build())
-  }
-
   /**
    * Marshall entity to json, insert it into the database, then unmarshal the response and return it
     *
@@ -245,7 +235,14 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
                        (implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
     val jsonString = marshalEntity[T](entity)
     val doc = RawJsonDocument.create(key, expiry, jsonString)
-    val insertObservable = insertDocumentWithBackoff(bucket, doc)
+    
+    val delay = Delay.exponential(TimeUnit.MILLISECONDS, CouchbaseStreamsWrapper.temporaryFailureRetryMs)
+    val insertObservable =  bucket.async().insert(doc, persist, replicate)
+      .retryWhen(RetryBuilder.anyOf(classOf[TemporaryFailureException])
+        .delay(delay)
+        .max(CouchbaseStreamsWrapper.temporaryFailureMaxRetries)
+        .build())
+        
     convertToEntity[T](insertObservable)
   }
 
