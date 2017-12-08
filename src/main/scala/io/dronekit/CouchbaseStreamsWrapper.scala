@@ -25,8 +25,6 @@ import com.couchbase.client.java.view.{AsyncViewRow, Stale, ViewQuery}
 import com.couchbase.client.java.error.TemporaryFailureException
 import com.couchbase.client.core.time.Delay
 import com.typesafe.scalalogging.Logger
-import org.joda.time.DateTime
-import org.joda.time.DateTimeZone.UTC
 import org.slf4j.LoggerFactory
 import rx.RxReactiveStreams
 import rx.lang.scala.JavaConversions.{toJavaObservable, toScalaObservable}
@@ -101,16 +99,6 @@ class DocumentNotFound(message: String) extends RuntimeException(message)
 object CouchbaseStreamsWrapper {
   // Keep the env in an object so it is only created once
   val env = DefaultCouchbaseEnvironment.builder().build()
-  /**
-    * A static key to query views by date. This key can be used as the start key for any date.
-    * The compound key is composed of year, month, day, hour, minute, second
-    */
-  val DateStartKey = Seq[Int](0, 0, 0, 0, 0, 0)
-  /**
-    * A static key to query views by date. This key can be used as the end key for any date.
-    * The compound key is composed of year, month, day, hour, minute, second
-    */
-  val DateEndKey = Seq[Int](9999, 99, 99, 99, 99, 99)
 
   val temporaryFailureRetryMs = 50
   val temporaryFailureMaxRetries = 5
@@ -366,23 +354,6 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
                          (implicit format: JsonFormat[T]):
   Future[DocumentResponse[T]] = {
     convertToEntity[T](row.document(classOf[RawJsonDocument]))
-  }
-
-  /**
-    * Create an array suitable for doing date queries on couchbase
-    *
-    * @param date The DateTime object to convert into a date array
-    * @return A sequence to use as a compound key in a couchbase view query
-    */
-  def getDateKey(date: DateTime): Seq[Int] = {
-    if (date.getZone != UTC) throw new IllegalArgumentException("DateTime must be in UTC timezone")
-    Seq(
-      date.year().get(),
-      date.monthOfYear().get(),
-      date.dayOfMonth().get(),
-      date.hourOfDay().get(),
-      date.minuteOfHour().get(),
-      date.secondOfMinute().get())
   }
 
   /**

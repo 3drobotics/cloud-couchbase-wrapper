@@ -1,4 +1,5 @@
 import java.util.UUID
+import java.time.{Duration, Instant}
 
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
@@ -18,13 +19,11 @@ import com.couchbase.client.java.query.{Index, N1qlParams, N1qlQuery, Statement}
 import com.couchbase.client.java.view.{DefaultView, DesignDocument, Stale}
 import com.typesafe.config.ConfigFactory
 import io.dronekit.{UpdateObject, CouchbaseStreamsWrapper, DocumentNotFound}
-import org.joda.time.DateTime
-import org.joda.time.DateTimeZone.UTC
 import org.scalatest._
 import spray.json._
 
 import scala.collection.JavaConversions._
-import scala.concurrent.duration._
+import scala.concurrent.duration.{Duration => _, _}
 import scala.concurrent.{Future, Await, ExecutionContext}
 import scala.language.postfixOps
 import scala.languageFeature.postfixOps
@@ -35,7 +34,7 @@ trait TestTrait{ val doc: String }
 
 case class TestEntity(id: String = UUID.randomUUID().toString,
                       name: String, age: Long, sex: Option[String],
-                      birthday: Option[DateTime] = None,
+                      birthday: Option[Instant] = None,
                       cas: Option[Long] = None,
                       doc: String = "TestEntity") extends TestTrait
 
@@ -46,15 +45,14 @@ case class OtherTestEntity(id: String = UUID.randomUUID().toString,
 
 
 class Protocol extends DefaultJsonProtocol {
-  implicit object dateTimeFormat extends RootJsonFormat[DateTime] {
-    override def read(json: JsValue): DateTime = {
-      DateTime.parse(json.convertTo[String])
-    }
+  implicit object instantFormat extends RootJsonFormat[Instant] {
+  def write(time: Instant) = JsString(time.toString)
 
-    override def write(obj: DateTime): JsValue = {
-      JsString(obj.toString)
-    }
+  def read(value: JsValue) = value match {
+    case JsString(str) => Instant.parse(str)
+    case _ => throw new DeserializationException("Cannot deserialize Instant")
   }
+}
 
   implicit val testEntityFormat = jsonFormat7(TestEntity)
   implicit val otherTestEntityFormat = jsonFormat5(OtherTestEntity)
@@ -145,7 +143,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
   createIndex("NameDoc", "ByName", nameMap, "")
   val nameAgeMap = "function (doc, meta) {if (doc.name && doc.age) {emit([doc.name, doc.age], null);} }"
   createIndex("NameAndAgeDoc", "ByNameAndAge", nameAgeMap, "")
-  val birthdayMap = "function (doc, meta) {if (doc.birthday) {emit(dateToArray(new Date(doc.birthday)), null);} }"
+  val birthdayMap = "function (doc, meta) {if (doc.birthday) {emit([new Date(doc.birthday).valueOf()], null);} }"
   createIndex("BirthdayDoc", "Birthday", birthdayMap, "")
 
 
@@ -246,10 +244,9 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
 
   "Should be able to query a compound key with a range" in {
     // create 10 people with birthdays
-    val startDate = new DateTime(UTC)
+    val startDate = Instant.now
     val peopleFuture = Future.sequence((1 to 10).map { num =>
-      val birthday = startDate
-        .plusDays(num)
+      val birthday = startDate.plus(Duration.ofDays(num))
       val sex: String = Seq("Male", "Female")(Random.nextInt(1))
       val person = TestEntity(
         name = s"Testing_$num",
@@ -261,11 +258,11 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     })
 
     // query for 5 of them
-    val endDate = new DateTime(UTC).plusDays(5)
+    val endDate = startDate.plus(Duration.ofDays(5))
     Await.ready(peopleFuture, 10 seconds)
     val src = couchbase.compoundIndexQueryByRangeToEntity[TestEntity](
-      "BirthdayDoc", "Birthday", Some(Seq(startDate.getYear(), startDate.getMonthOfYear(), 0, 0, 0, 0)),
-      Some(Seq(endDate.getYear(), endDate.getMonthOfYear(), endDate.getDayOfMonth(), 999, 999, 999)), Stale.FALSE
+      "BirthdayDoc", "Birthday", Some(Seq(startDate.toEpochMilli)),
+      Some(Seq(endDate.toEpochMilli)), Stale.FALSE
     )
 
     val result = Await.result(src.grouped(10).runWith(Sink.head), 10 seconds).map(_.entity)
@@ -396,10 +393,8 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
 
   "Should be able to paginate objects and return sorted by date" in {
     val peopleFuture = Future.sequence((1 to 100).map { num =>
-      val birthday = new DateTime(UTC)
-        .plusHours(Random.nextInt(10))
-        .plusMinutes(Random.nextInt(59))
-        .plusSeconds(Random.nextInt(59))
+      val birthday = Instant.now
+        .plus(Duration.ofSeconds(Random.nextInt(10*60*60)))
       val sex: String = Seq("Male", "Female")(Random.nextInt(1))
       val person = TestEntity(
         name = s"Testing_$num",
@@ -410,15 +405,15 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
       couchbase.insertDocument[TestEntity](person, person.id, persist = PersistTo.MASTER).map(docResp => docResp.entity)
     })
     Await.ready(peopleFuture, 10 seconds)
-    var lastDateTime = new DateTime(UTC).minusDays(1)
-    var startKey = CouchbaseStreamsWrapper.DateStartKey
+    var lastDateTime = Instant.now.minus(Duration.ofDays(1))
+    var startKey: Long = 0
     var startDocId: Option[String] = None
     (0 to 9).foreach { offset =>
       val queryResponse = Await.result(couchbase.paginatedIndexQuery[TestEntity](
         designDoc = "BirthdayDoc",
         viewDoc = "Birthday",
-        startKey = startKey,
-        endKey = CouchbaseStreamsWrapper.DateEndKey,
+        startKey = Seq(startKey),
+        endKey = Seq(""),
         startDocId = startDocId,
         limit = 10,
         stale = Stale.FALSE
@@ -427,14 +422,14 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
           // Yuck... This should not be necessary at all, however somewhere between the query
           // to couchbase and the runWith above, the rows can get out of order (which should not happen!)
           // Need to investigate the root cause of this but don't have time to now.
-          .sortBy(doc => doc.entity.birthday.get.getMillis)
+          .sortBy(doc => doc.entity.birthday.get.toEpochMilli)
       rows.length shouldBe 10
       rows.foreach { docResponse =>
-        assert(docResponse.entity.birthday.get.getMillis > lastDateTime.getMillis, s"${docResponse.entity} is out of order with $lastDateTime")
+        assert(docResponse.entity.birthday.get.toEpochMilli > lastDateTime.toEpochMilli, s"${docResponse.entity} is out of order with $lastDateTime")
         lastDateTime = docResponse.entity.birthday.get
       }
       startDocId = Some(rows.last.entity.id)
-      startKey = couchbase.getDateKey(rows.last.entity.birthday.get)
+      startKey = rows.last.entity.birthday.get.toEpochMilli
     }
   }
 }

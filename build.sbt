@@ -34,7 +34,6 @@ libraryDependencies ++= {
     "com.couchbase.client" % "java-client" % "2.4.4",
     "io.reactivex" % "rxjava-reactive-streams" % "1.2.1",
     "io.reactivex" %% "rxscala" % "0.26.5",
-    "joda-time" % "joda-time" % "2.9.1",
     "org.scalatest" %% "scalatest" % "3.0.1" % "test"
   )
 }
