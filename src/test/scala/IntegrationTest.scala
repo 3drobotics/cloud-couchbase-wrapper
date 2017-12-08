@@ -91,27 +91,8 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
   val p = new Protocol()
   import p._
 
-  val cluster = CouchbaseCluster.create(CouchbaseStreamsWrapper.env, "127.0.0.1")
-  val clusterManager = cluster.clusterManager("Administrator", "password")
-  val testBucketName = Random.alphanumeric.take(10).mkString
+  val testBucketName = "cloud-couchbase-wrapper-test"
   val testBucketPassword = "password"
-
-  val bucketSettings = new DefaultBucketSettings.Builder()
-    .`type`(BucketType.COUCHBASE)
-    .name(testBucketName)
-    .password(testBucketPassword)
-    .quota(256) // megabytes
-    .replicas(0)
-    .indexReplicas(false)
-    .enableFlush(true)
-    .build()
-  clusterManager.insertBucket(bucketSettings)
-
-  override def afterAll() {
-    clusterManager.removeBucket(testBucketName)
-  }
-
-
 
   implicit val system: ActorSystem = ActorSystem()
   implicit val materializer: ActorMaterializer = ActorMaterializer()
@@ -124,12 +105,8 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     testBucketPassword,
     this)
 
+  couchbase.bucket.bucketManager().flush();
   couchbase.bucket.query(Index.createPrimaryIndex().on(testBucketName))
-
-
-  def flushBucket(): Unit = {
-    BucketFlusher.flush(couchbase.cluster.core(), testBucketName, testBucketPassword).toBlocking.first()
-  }
 
   def createIndex(designDocName: String, viewName: String, mapFunction: String, reduceFunction: String): Unit = {
     val tokenView =
