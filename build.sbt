@@ -2,10 +2,10 @@ name := "couchbasestreamswrapper"
 
 organization := "io.dronekit"
 
-version := "2.4.4"
+version := "2.4.5"
 
-scalaVersion := "2.12.2"
-crossScalaVersions := Seq("2.11.8", "2.12.2")
+scalaVersion := "2.12.4"
+crossScalaVersions := Seq("2.11.8", "2.12.4")
 
 scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8", "-feature", "-language:postfixOps")
 
@@ -24,7 +24,7 @@ publishTo := {
 }
 
 libraryDependencies ++= {
-  val akkaV = "2.5.0"
+  val akkaV = "2.5.4"
   Seq(
     "com.typesafe.akka" %% "akka-stream" % akkaV,
     "com.typesafe.akka" %% "akka-stream-testkit" % akkaV,
