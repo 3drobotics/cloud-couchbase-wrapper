@@ -112,7 +112,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
   val bucketSettings = new DefaultBucketSettings.Builder()
     .`type`(BucketType.COUCHBASE)
     .name(testBucketName)
-    .password(testBucketPassword)
+//    .password(testBucketPassword)
     .quota(256) // megabytes
     .replicas(0)
     .indexReplicas(false)

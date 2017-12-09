@@ -2,7 +2,7 @@ name := "couchbase-streams-wrapper"
 
 organization := "io.outofaxis"
 
-version := "1.0.6-SNAPSHOT"
+version := "1.0.7-SNAPSHOT"
 
 scalaVersion := "2.11.11"
 
@@ -10,7 +10,7 @@ scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8", "-featur
 
 libraryDependencies ++= {
   val scalaTestV = "3.0.0"
-  val akkaV = "2.5.6"
+  val akkaV = "2.5.8"
   Seq(
     "com.typesafe.akka" %% "akka-stream" % akkaV,
     "com.typesafe.akka" %% "akka-stream-testkit" % akkaV,
