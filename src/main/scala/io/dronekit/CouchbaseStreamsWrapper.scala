@@ -123,8 +123,8 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
                              (implicit ec: ExecutionContext, mat: ActorMaterializer) {
   // Reuse the env here
   val cluster = CouchbaseCluster.create(CouchbaseStreamsWrapper.env, host)
-//  val bucket = cluster.openBucket(bucketName, password)
-  val bucket = cluster.openBucket(bucketName)
+  val bucket = cluster.openBucket(bucketName, password)
+//  val bucket = cluster.openBucket(bucketName)
   val log: Logger = Logger(LoggerFactory.getLogger(getClass))
 
   /**
