@@ -20,7 +20,7 @@ import com.couchbase.client.java.view.{DefaultView, DesignDocument, Stale}
 import com.typesafe.config.ConfigFactory
 import io.dronekit.{UpdateObject, CouchbaseStreamsWrapper, DocumentNotFound}
 import org.scalatest._
-import spray.json._
+import play.api.libs.json._
 
 import scala.collection.JavaConversions._
 import scala.concurrent.duration.{Duration => _, _}
@@ -44,37 +44,24 @@ case class OtherTestEntity(id: String = UUID.randomUUID().toString,
                             doc: String = "OtherTestEntity") extends TestTrait
 
 
-class Protocol extends DefaultJsonProtocol {
-  implicit object instantFormat extends RootJsonFormat[Instant] {
-  def write(time: Instant) = JsString(time.toString)
+object Protocol{
+  implicit val testEntityFormat = Json.format[TestEntity]
+  implicit val otherTestEntityFormat = Json.format[OtherTestEntity]
 
-  def read(value: JsValue) = value match {
-    case JsString(str) => Instant.parse(str)
-    case _ => throw new DeserializationException("Cannot deserialize Instant")
-  }
-}
-
-  implicit val testEntityFormat = jsonFormat7(TestEntity)
-  implicit val otherTestEntityFormat = jsonFormat5(OtherTestEntity)
-
-  implicit object testTraitFormat extends RootJsonFormat[TestTrait] {
-    override def read(json: JsValue): TestTrait = {
-      json.asJsObject.fields.get("doc") match {
-        case Some(doc) =>
-          doc.convertTo[String] match {
-          case "TestEntity" => json.convertTo[TestEntity]
-          case "OtherTestEntity" => json.convertTo[OtherTestEntity]
-          case str: String => throw new RuntimeException(s"Could not read TestTrait due to other doc type ${str}")
-          case _ => throw new RuntimeException("did not get a string for TestTrait doctype")
-        }
-        case _ => throw new RuntimeException("Could not read TestTrait due to empty doc type")
+  implicit object testTraitFormat extends Format[TestTrait] {
+    override def reads(json: JsValue): JsResult[TestTrait] = {
+      (json \ "doc").validateOpt[String] flatMap {
+        case Some("TestEntity") => json.validate[TestEntity]
+        case Some("OtherTestEntity") => json.validate[OtherTestEntity]
+        case Some(str: String) => JsError(s"Could not read TestTrait due to other doc type ${str}")
+        case _ => JsError("did not get a string for TestTrait doctype")
       }
     }
 
-    override def write(obj: TestTrait): JsValue = {
+    override def writes(obj: TestTrait): JsValue = {
       obj.doc match {
-        case "TestEntity" => obj.asInstanceOf[TestEntity].toJson
-        case "OtherTestEntity" => obj.asInstanceOf[OtherTestEntity].toJson
+        case "TestEntity" => Json.toJson(obj.asInstanceOf[TestEntity])(testEntityFormat)
+        case "OtherTestEntity" => Json.toJson(obj.asInstanceOf[OtherTestEntity])(otherTestEntityFormat)
         case _ => throw new RuntimeException("Could not write TestTrait")
       }
     }
@@ -87,9 +74,8 @@ class Protocol extends DefaultJsonProtocol {
  *
  * Integration test class for CouchbaseStreamsWrapper, requires a running Couchbase instance
  */
-class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with DefaultJsonProtocol {
-  val p = new Protocol()
-  import p._
+class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
+  import Protocol._
 
   val testBucketName = "cloud-couchbase-wrapper-test"
   val testBucketPassword = "password"
@@ -102,8 +88,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
   val couchbase = new CouchbaseStreamsWrapper(
     couchbaseConfig.getString("hostname"),
     testBucketName,
-    testBucketPassword,
-    this)
+    testBucketPassword)
 
   couchbase.bucket.bucketManager().flush();
   couchbase.bucket.query(Index.createPrimaryIndex().on(testBucketName))

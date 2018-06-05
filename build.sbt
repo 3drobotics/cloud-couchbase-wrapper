@@ -2,7 +2,7 @@ name := "couchbasestreamswrapper"
 
 organization := "io.dronekit"
 
-version := "2.4.5"
+version := "3.0.0"
 
 scalaVersion := "2.12.6"
 
@@ -27,7 +27,7 @@ libraryDependencies ++= {
   Seq(
     "com.typesafe.akka" %% "akka-stream" % akkaV,
     "com.typesafe.akka" %% "akka-stream-testkit" % akkaV,
-    "io.spray" %%  "spray-json" % "1.3.3",
+    "com.typesafe.play" %% "play-json" % "2.6.7",
     "ch.qos.logback" % "logback-classic" % "1.1.3",
     "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0",
     "com.couchbase.client" % "java-client" % "2.5.8",
