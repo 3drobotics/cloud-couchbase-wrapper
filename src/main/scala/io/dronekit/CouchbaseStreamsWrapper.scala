@@ -31,6 +31,7 @@ import rx.lang.scala.JavaConversions.{toJavaObservable, toScalaObservable}
 import rx.lang.scala.Observable
 import spray.json.{DefaultJsonProtocol, _}
 import java.lang.Thread
+import play.api.libs.json._
 
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -165,6 +166,10 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     entity.toJson.compactPrint
   }
 
+  private def marshalEntityPlay[T](entity: T)(implicit format: Format[T]): String = {
+    Json.stringify(Json.toJson(entity))
+  }
+
   /**
    * Using spray-json, convert the found document into an entity of type T
     *
@@ -178,6 +183,18 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     val p = Promise[DocumentResponse[T]]
     toScalaObservable(docObservable).subscribe(
       doc => p.trySuccess(DocumentResponse(cas = doc.cas(), entity = doc.content().parseJson.convertTo[T])),
+      e => p.tryFailure(e),
+      () => p.tryFailure(new DocumentNotFound(""))
+    )
+    p.future
+  }
+
+  /* convert document to entity using play-json */
+  private def convertToEntityPlay[T](docObservable: Observable[RawJsonDocument])
+                                (implicit format: Format[T]): Future[DocumentResponse[T]] = {
+    val p = Promise[DocumentResponse[T]]
+    toScalaObservable(docObservable).subscribe(
+      doc => p.trySuccess(DocumentResponse(cas = doc.cas(), entity = Json.parse(doc.content()).as[T])),
       e => p.tryFailure(e),
       () => p.tryFailure(new DocumentNotFound(""))
     )
@@ -203,6 +220,17 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     }
   }
 
+  private def convertToEntityPlay[T](jsonDocument: RawJsonDocument)(implicit format: Format[T]): DocumentResponse[T] = {
+    try {
+      val entity = Json.parse(jsonDocument.content()).as[T]
+      DocumentResponse(cas = jsonDocument.cas(), entity = entity)
+    } catch {
+      case ex: DeserializationException =>
+        log.error(s"Caught $ex when converting:\n ${jsonDocument.content()}")
+        throw ex
+    }
+  }
+
   /**
    * Replace a document in couchbase with the given entity by marshalling it to
    * json, then returning the unmarshalled json returned from couchbase
@@ -219,6 +247,13 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     val doc = RawJsonDocument.create(key, expiry, jsonString, cas)
     val replaceObservable = bucket.async().replace(doc)
     convertToEntity[T](replaceObservable)
+  }
+
+  def replaceDocumentPlay[T](entity: T, key: String, cas: Long, expiry: Int = 0)(implicit format: Format[T]): Future[DocumentResponse[T]] = {
+    val jsonString = marshalEntityPlay[T](entity)
+    val doc = RawJsonDocument.create(key, expiry, jsonString, cas)
+    val replaceObservable = bucket.async().replace(doc)
+    convertToEntityPlay[T](replaceObservable)
   }
 
   /**
@@ -246,6 +281,22 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     convertToEntity[T](insertObservable)
   }
 
+  def insertDocumentPlay[T](entity: T, key: String, expiry: Int = 0,
+                        persist: PersistTo = PersistTo.NONE, replicate: ReplicateTo = ReplicateTo.NONE)
+                       (implicit format: Format[T]): Future[DocumentResponse[T]] = {
+    val jsonString = marshalEntityPlay[T](entity)
+    val doc = RawJsonDocument.create(key, expiry, jsonString)
+
+    val delay = Delay.exponential(TimeUnit.MILLISECONDS, CouchbaseStreamsWrapper.temporaryFailureRetryMs)
+    val insertObservable =  bucket.async().insert(doc, persist, replicate)
+      .retryWhen(RetryBuilder.anyOf(classOf[TemporaryFailureException])
+        .delay(delay)
+        .max(CouchbaseStreamsWrapper.temporaryFailureMaxRetries)
+        .build())
+
+    convertToEntityPlay[T](insertObservable)
+  }
+
   /**
    * Lookup a document in couchbase by the key, and unmarshal it into an object: T
     *
@@ -256,6 +307,11 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
   def lookupByKey[T](key: String)(implicit format: JsonFormat[T]): Future[DocumentResponse[T]] = {
     val docObservable = bucket.async().get(key, classOf[RawJsonDocument])
     convertToEntity[T](docObservable)
+  }
+
+  def lookupByKeyPlay[T](key: String)(implicit format: Format[T]): Future[DocumentResponse[T]] = {
+    val docObservable = bucket.async().get(key, classOf[RawJsonDocument])
+    convertToEntityPlay[T](docObservable)
   }
 
   def binaryLookupByKey(key: String): Future[DocumentResponse[ByteString]] = {
@@ -500,6 +556,14 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     val query = indexQuery(designDoc, viewDoc, keys, stale, limit, skip)
     val docs = withDocuments(query)
     Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(docs))).map(convertToEntity[T])
+  }
+
+  def indexQueryToEntityPlay[T](designDoc: String, viewDoc: String, keys: List[String] = List(), stale: Stale = Stale.FALSE,
+                           limit: Int = Int.MaxValue, skip: Int = 0)
+                           (implicit format: Format[T]): Source[DocumentResponse[T], Any] = {
+    val query = indexQuery(designDoc, viewDoc, keys, stale, limit, skip)
+    val docs = withDocuments(query)
+    Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(docs))).map(convertToEntityPlay[T])
   }
 
   /**
