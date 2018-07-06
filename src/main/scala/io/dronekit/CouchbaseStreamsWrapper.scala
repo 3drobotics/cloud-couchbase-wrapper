@@ -585,6 +585,15 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(docs))).map(convertToEntity[T])
   }
 
+  def compoundIndexQueryByKeysToEntityPlay[T](designDoc: String, viewDoc: String, keys: Option[List[List[Any]]] = None,
+                                    stale: Stale = Stale.FALSE, limit: Int = Int.MaxValue, skip: Int = 0)
+                                   (implicit format: Format[T]):
+  Source[DocumentResponse[T], Any] = {
+    val query = compoundIndexQuery(designDoc, viewDoc, keys, None, None, stale, limit, skip)
+    val docs = withDocuments(query)
+    Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(docs))).map(convertToEntityPlay[T])
+  }
+
   /**
    * Query a compound index with a start & end range and unmarshal the results
    * @param designDoc The name of the design document
