@@ -615,6 +615,16 @@ class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String
     val docs = withDocuments(query)
     Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(docs))).map(convertToEntity[T])
   }
+  
+  def compoundIndexQueryByRangeToEntityPlay[T](designDoc: String, viewDoc: String, startKey: Option[Seq[Any]] = None,
+                                           endKey: Option[Seq[Any]] = None, stale: Stale = Stale.FALSE,
+                                           limit: Int = Int.MaxValue, skip: Int = 0)
+                                          (implicit format: Format[T]):
+  Source[DocumentResponse[T], Any] = {
+    val query = compoundIndexQuery(designDoc, viewDoc, None, startKey, endKey, stale, limit, skip)
+    val docs = withDocuments(query)
+    Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(docs))).map(convertToEntityPlay[T])
+  }
 
   /**
     * Query couchbase using the N1QL interface. There must be an index created on the bucket for this to succeed.
