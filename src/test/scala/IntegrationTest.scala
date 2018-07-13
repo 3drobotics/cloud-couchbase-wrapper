@@ -103,7 +103,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     couchbaseConfig.getString("hostname"),
     testBucketName,
     testBucketPassword,
-    this)
+  )
 
   couchbase.bucket.bucketManager().flush();
   couchbase.bucket.query(Index.createPrimaryIndex().on(testBucketName))
