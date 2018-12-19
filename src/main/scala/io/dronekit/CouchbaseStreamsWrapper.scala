@@ -138,17 +138,19 @@ object JsonSerializer extends JsonSerializerLowPriority {
   * @param mat Materializer for Akka-Streams
   */
 
-class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, password: String)
+class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName: String, password: String)
                     (implicit ec: ExecutionContext, mat: ActorMaterializer)
 {
 
+  // legacy Couchbase setup method - assumes the bucket name and user name are identical
   def this(host: String, bucketName: String, password: String)(implicit ec: ExecutionContext, mat: ActorMaterializer) {
-    this(List(host), bucketName, password)
+    this(List(host), bucketName, bucketName, password)
   }
 
   // Reuse the env here
   val cluster = CouchbaseCluster.create(CouchbaseStreamsWrapper.env, hosts.asJava)
-  val bucket = cluster.openBucket(bucketName, password)
+  cluster.authenticate(userName, password)
+  val bucket = cluster.openBucket(bucketName)
   val log: Logger = Logger(LoggerFactory.getLogger(getClass))
 
   /**
