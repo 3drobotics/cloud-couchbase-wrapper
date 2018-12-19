@@ -103,6 +103,7 @@ object CouchbaseStreamsWrapper {
 
   val temporaryFailureRetryMs = 50
   val temporaryFailureMaxRetries = 5
+
 }
 
 trait JsonSerializer[T] {
@@ -136,12 +137,20 @@ object JsonSerializer extends JsonSerializerLowPriority {
   * @param ec Execution Context for Futures and Streams
   * @param mat Materializer for Akka-Streams
   */
-class CouchbaseStreamsWrapper(host: String, bucketName: String, password: String)
+
+class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName: String, password: String)
                     (implicit ec: ExecutionContext, mat: ActorMaterializer)
 {
+
+  // legacy Couchbase setup method - assumes the bucket name and user name are identical
+  def this(host: String, bucketName: String, password: String)(implicit ec: ExecutionContext, mat: ActorMaterializer) {
+    this(List(host), bucketName, bucketName, password)
+  }
+
   // Reuse the env here
-  val cluster = CouchbaseCluster.create(CouchbaseStreamsWrapper.env, host)
-  val bucket = cluster.openBucket(bucketName, password)
+  val cluster = CouchbaseCluster.create(CouchbaseStreamsWrapper.env, hosts.asJava)
+  cluster.authenticate(userName, password)
+  val bucket = cluster.openBucket(bucketName)
   val log: Logger = Logger(LoggerFactory.getLogger(getClass))
 
   /**
