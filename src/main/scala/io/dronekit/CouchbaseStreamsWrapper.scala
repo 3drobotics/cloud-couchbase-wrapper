@@ -33,6 +33,9 @@ import spray.json.{DefaultJsonProtocol, _}
 import java.lang.Thread
 import play.api.libs.json._
 
+import com.amazonaws.services.ec2.AmazonEC2ClientBuilder
+import com.amazonaws.services.ec2.model.{Filter, DescribeInstancesRequest, Instance, Reservation}
+
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
@@ -667,5 +670,32 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
         errors = observableToFuture(queryResult.errors()),
         info = observableToFuture[N1qlMetrics](queryResult.info())
       )}
+  }
+}
+
+object CouchbaseServiceDiscoveryHelper {
+
+  lazy val ec2Client = AmazonEC2ClientBuilder.defaultClient()
+
+  def getCouchbaseHostIPaddresses(clusterTagValueName: String): Seq[String] = {
+    val keyName = "tag:aws:autoscaling:groupName"
+    val filters = List(new Filter(keyName, scala.collection.immutable.List(clusterTagValueName).asJava)).asJava
+    val describeInstancesRequest = new DescribeInstancesRequest()
+      .withFilters(filters)
+
+      println(s"Fetching couchbase node IP addresses from AWS API using EC2 tag: ${keyName}")
+      val describeInstancesResult = ec2Client.describeInstances(describeInstancesRequest)
+      val reservations: Seq[Reservation] = describeInstancesResult.getReservations().asScala.toSeq
+      val instances: Seq[Instance] = reservations.headOption.map(x => x.getInstances().asScala.toSeq).getOrElse(Seq())
+      val ipAddresses: Seq[String] = instances.map(_.getPrivateIpAddress)
+
+
+      if (ipAddresses.length == 0) {
+        println("No couchbase node IP addresses discovered")
+      } else {
+        println(s"Discovered couchbase node IP addresses: ${ipAddresses}")
+      }
+
+      ipAddresses
   }
 }

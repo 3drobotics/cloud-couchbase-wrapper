@@ -2,7 +2,7 @@ name := "couchbasestreamswrapper"
 
 organization := "io.dronekit"
 
-version := "2.7.1"
+version := "2.7.2"
 
 scalaVersion := "2.12.6"
 
@@ -34,6 +34,7 @@ libraryDependencies ++= {
     "com.couchbase.client" % "java-client" % "2.5.8",
     "io.reactivex" % "rxjava-reactive-streams" % "1.2.1",
     "io.reactivex" %% "rxscala" % "0.26.5",
-    "org.scalatest" %% "scalatest" % "3.0.1" % "test"
+    "org.scalatest" %% "scalatest" % "3.0.1" % "test",
+    "com.amazonaws" % "aws-java-sdk-ec2" % "1.11.269"
   )
 }
