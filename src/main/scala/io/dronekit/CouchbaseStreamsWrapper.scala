@@ -96,6 +96,7 @@ case class RawQueryResponse(rows: Source[AsyncN1qlQueryRow, Any],
 case class UpdateObject[T](entity: T, cas: Long, key: String)
 
 class DocumentNotFound(message: String) extends RuntimeException(message)
+class DeserializationError(couchbaseKey: String, exception: JsResultException) extends RuntimeException(s"Deserialization error with couchbase key '${couchbaseKey}': ${exception}")
 
 object CouchbaseStreamsWrapper {
   // Keep the env in an object so it is only created once
@@ -194,9 +195,10 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
    */
   private def convertToEntity[T](docObservable: Observable[RawJsonDocument])
                                 (implicit format: JsonSerializer[T]): Future[DocumentResponse[T]] = {
+
     val p = Promise[DocumentResponse[T]]
     toScalaObservable(docObservable).subscribe(
-      doc => p.trySuccess(DocumentResponse(cas = doc.cas(), entity = format.parse(doc.content()))),
+      doc => p.trySuccess(convertToEntity(doc)),
       e => p.tryFailure(e),
       () => p.tryFailure(new DocumentNotFound(""))
     )
@@ -212,8 +214,14 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
    * @return A DocumentResponse with the entity and the current CAS value
    */
   private def convertToEntity[T](jsonDocument: RawJsonDocument)(implicit format: JsonSerializer[T]): DocumentResponse[T] = {
-    val entity = format.parse(jsonDocument.content())
-    DocumentResponse(cas = jsonDocument.cas(), entity = entity)
+    try {
+      val entity = format.parse(jsonDocument.content())
+      DocumentResponse(cas = jsonDocument.cas(), entity = entity)
+    } catch {
+      case e: JsResultException => throw new DeserializationError(
+        couchbaseKey = jsonDocument.id, exception = e
+      )
+    }
   }
 
   /**
