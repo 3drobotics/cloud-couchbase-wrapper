@@ -2,9 +2,9 @@ name := "couchbasestreamswrapper"
 
 organization := "io.dronekit"
 
-version := "2.7.4"
+version := "2.8.0"
 
-scalaVersion := "2.12.6"
+scalaVersion := "2.12.8"
 
 scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8", "-feature", "-language:postfixOps")
 
@@ -23,17 +23,17 @@ publishTo := {
 }
 
 libraryDependencies ++= {
-  val akkaV = "2.5.12"
+  val akkaV = "2.5.23"
   Seq(
     "com.typesafe.akka" %% "akka-stream" % akkaV,
-    "com.typesafe.akka" %% "akka-stream-testkit" % akkaV,
+    "com.typesafe.akka" %% "akka-stream-testkit" % akkaV % Test,
     "io.spray" %%  "spray-json" % "1.3.3",
-    "com.typesafe.play" %% "play-json" % "2.6.7",
+    "com.typesafe.play" %% "play-json" % "2.7.4",
     "ch.qos.logback" % "logback-classic" % "1.1.3",
     "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0",
     "com.couchbase.client" % "java-client" % "2.5.8",
     "io.reactivex" % "rxjava-reactive-streams" % "1.2.1",
     "io.reactivex" %% "rxscala" % "0.26.5",
-    "org.scalatest" %% "scalatest" % "3.0.1" % "test"
+    "org.scalatest" %% "scalatest" % "3.0.1" % Test
   )
 }
