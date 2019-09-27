@@ -29,7 +29,6 @@ import org.slf4j.LoggerFactory
 import rx.RxReactiveStreams
 import rx.lang.scala.JavaConversions.{toJavaObservable, toScalaObservable}
 import rx.lang.scala.Observable
-import spray.json.{DefaultJsonProtocol, _}
 import java.lang.Thread
 import play.api.libs.json._
 
@@ -112,16 +111,7 @@ trait JsonSerializer[T] {
   def serialize(v: T): String
 }
 
-// Scala prefers subclasses over superclasses when resolving implicits. When both typeclasses are available, this
-// makes it choose Play instead of reporting an ambiguous implicit error.
-sealed trait JsonSerializerLowPriority {
-  implicit def sprayCompat[T](implicit fmt: spray.json.JsonFormat[T]) = new JsonSerializer[T] {
-    def parse(s: String): T = fmt.read(s.parseJson)
-    def serialize(v: T): String = fmt.write(v).compactPrint
-  }
-}
-
-object JsonSerializer extends JsonSerializerLowPriority {
+object JsonSerializer {
   implicit def playCompat[T](implicit fmt: play.api.libs.json.Format[T]) = new JsonSerializer[T] {
     def parse(s: String): T = Json.parse(s).as[T]
     def serialize(v: T): String = Json.stringify(fmt.writes(v))
@@ -186,7 +176,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
 
 
   /**
-   * Using spray-json, convert the found document into an entity of type T
+   * Using play-json, convert the found document into an entity of type T
     *
     * @param docObservable The observable to get the json document from
    * @param format The json format implicit to use for conversion
@@ -206,7 +196,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
   }
 
   /**
-   * Using spray-json, convert the found document into an entity of type T
+   * Using play-json, convert the found document into an entity of type T
     *
     * @param jsonDocument The document retrieved
    * @param format The json format implicit to use for conversion

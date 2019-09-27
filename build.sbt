@@ -27,7 +27,6 @@ libraryDependencies ++= {
   Seq(
     "com.typesafe.akka" %% "akka-stream" % akkaV,
     "com.typesafe.akka" %% "akka-stream-testkit" % akkaV % Test,
-    "io.spray" %%  "spray-json" % "1.3.3",
     "com.typesafe.play" %% "play-json" % "2.7.4",
     "ch.qos.logback" % "logback-classic" % "1.1.3",
     "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0",

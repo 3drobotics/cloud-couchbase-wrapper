@@ -20,15 +20,27 @@ import com.couchbase.client.java.view.{DefaultView, DesignDocument, Stale}
 import com.typesafe.config.ConfigFactory
 import io.dronekit.{UpdateObject, CouchbaseStreamsWrapper, DocumentNotFound}
 import org.scalatest._
-import spray.json._
+import play.api.libs.json._
 
-import scala.collection.JavaConversions._
+import scala.collection.JavaConverters._
 import scala.concurrent.duration.{Duration => _, _}
 import scala.concurrent.{Future, Await, ExecutionContext}
 import scala.language.postfixOps
 import scala.languageFeature.postfixOps
 import scala.util.Random
 
+object Protocol {
+  implicit val instantFormat = new Format[Instant] {
+    def writes(instant: Instant): JsValue = {
+      JsString(instant.toString)
+    }
+
+    def reads(json: JsValue): JsResult[Instant] = json match {
+      case JsString(str) => JsSuccess(Instant.parse(str))
+      case _ => JsError("expected ISO 8601 timestamp string")
+    }
+  }
+}
 
 trait TestTrait{ val doc: String }
 
@@ -38,59 +50,45 @@ case class TestEntity(id: String = UUID.randomUUID().toString,
                       cas: Option[Long] = None,
                       doc: String = "TestEntity") extends TestTrait
 
+object TestEntity {
+  implicit val format = Json.format[TestEntity]
+}
+
 case class OtherTestEntity(id: String = UUID.randomUUID().toString,
                             name: String, location: String,
                             cas: Option[Long] = None,
                             doc: String = "OtherTestEntity") extends TestTrait
 
-
-class Protocol extends DefaultJsonProtocol {
-  implicit object instantFormat extends RootJsonFormat[Instant] {
-  def write(time: Instant) = JsString(time.toString)
-
-  def read(value: JsValue) = value match {
-    case JsString(str) => Instant.parse(str)
-    case _ => throw new DeserializationException("Cannot deserialize Instant")
-  }
+object OtherTestEntity {
+  implicit val format = Json.format[OtherTestEntity]
 }
 
-  implicit val testEntityFormat = jsonFormat7(TestEntity)
-  implicit val otherTestEntityFormat = jsonFormat5(OtherTestEntity)
-
-  implicit object testTraitFormat extends RootJsonFormat[TestTrait] {
-    override def read(json: JsValue): TestTrait = {
-      json.asJsObject.fields.get("doc") match {
-        case Some(doc) =>
-          doc.convertTo[String] match {
-          case "TestEntity" => json.convertTo[TestEntity]
-          case "OtherTestEntity" => json.convertTo[OtherTestEntity]
-          case str: String => throw new RuntimeException(s"Could not read TestTrait due to other doc type ${str}")
-          case _ => throw new RuntimeException("did not get a string for TestTrait doctype")
-        }
-        case _ => throw new RuntimeException("Could not read TestTrait due to empty doc type")
+object TestTrait {
+  implicit val format = new Format[TestTrait] {
+    def reads(json: JsValue): JsResult[TestTrait] = {
+      (json \ "doc").asOpt[String] match {
+        case Some("TestEntity") => json.validate[TestEntity]
+        case Some("OtherTestEntity") => json.validate[OtherTestEntity]
+        case _ => throw new RuntimeException("did not get a string for TestTrait doctype")
       }
     }
 
-    override def write(obj: TestTrait): JsValue = {
+    override def writes(obj: TestTrait): JsValue = {
       obj.doc match {
-        case "TestEntity" => obj.asInstanceOf[TestEntity].toJson
-        case "OtherTestEntity" => obj.asInstanceOf[OtherTestEntity].toJson
+        case "TestEntity" => Json.toJson(obj.asInstanceOf[TestEntity])
+        case "OtherTestEntity" => Json.toJson(obj.asInstanceOf[OtherTestEntity])
         case _ => throw new RuntimeException("Could not write TestTrait")
       }
     }
   }
 }
 
-
 /**
  * Created by Jason Martens on 9/25/15.
  *
  * Integration test class for CouchbaseStreamsWrapper, requires a running Couchbase instance
  */
-class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with DefaultJsonProtocol {
-  val p = new Protocol()
-  import p._
-
+class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
   val testBucketName = "cloud-couchbase-wrapper-test"
   val testBucketPassword = "password"
 
@@ -112,7 +110,7 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll with
     val tokenView =
       if (reduceFunction.isEmpty) DefaultView.create(viewName, mapFunction)
       else DefaultView.create(viewName, mapFunction, reduceFunction)
-    val designDoc = DesignDocument.create(designDocName, List(tokenView))
+    val designDoc = DesignDocument.create(designDocName, List(tokenView).asJava)
     couchbase.bucket.bucketManager().upsertDesignDocument(designDoc, false)
   }
 
