@@ -28,8 +28,6 @@ libraryDependencies ++= {
     "com.typesafe.akka" %% "akka-stream" % akkaV,
     "com.typesafe.akka" %% "akka-stream-testkit" % akkaV % Test,
     "com.typesafe.play" %% "play-json" % "2.7.4",
-    "ch.qos.logback" % "logback-classic" % "1.1.3",
-    "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0",
     "com.couchbase.client" % "java-client" % "2.5.8",
     "io.reactivex" % "rxjava-reactive-streams" % "1.2.1",
     "org.scalatest" %% "scalatest" % "3.0.1" % Test

@@ -24,8 +24,6 @@ import com.couchbase.client.java.query.dsl.{Expression, Sort}
 import com.couchbase.client.java.view.{AsyncViewRow, Stale, ViewQuery}
 import com.couchbase.client.java.error.TemporaryFailureException
 import com.couchbase.client.core.time.Delay
-import com.typesafe.scalalogging.Logger
-import org.slf4j.LoggerFactory
 import rx.RxReactiveStreams
 import rx.{Observable, Subscriber}
 import scala.concurrent.{Future, Promise}
@@ -139,7 +137,6 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
   val cluster = CouchbaseCluster.create(CouchbaseStreamsWrapper.env, hosts.asJava)
   cluster.authenticate(userName, password)
   val bucket = cluster.openBucket(bucketName)
-  val log: Logger = Logger(LoggerFactory.getLogger(getClass))
 
   /**
    * Convert an Observable with 0 or 1 element into an Option[Future]
