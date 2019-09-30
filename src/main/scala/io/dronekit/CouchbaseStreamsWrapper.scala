@@ -7,12 +7,13 @@ package io.dronekit
 
 import java.util.NoSuchElementException
 import java.util.concurrent.TimeUnit
+
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{Sink, Source}
+import akka.stream.scaladsl.Source
 import akka.util.ByteString
 import com.couchbase.client.deps.io.netty.buffer._
 import com.couchbase.client.deps.io.netty.util.ReferenceCountUtil
-import com.couchbase.client.java.{ReplicateTo, PersistTo, CouchbaseCluster, Bucket}
+import com.couchbase.client.java.{CouchbaseCluster, PersistTo, ReplicateTo}
 import com.couchbase.client.java.util.retry.RetryBuilder
 import com.couchbase.client.java.document.json.{JsonArray, JsonObject}
 import com.couchbase.client.java.document.{BinaryDocument, JsonDocument, RawJsonDocument}
@@ -26,12 +27,11 @@ import com.couchbase.client.java.error.TemporaryFailureException
 import com.couchbase.client.core.time.Delay
 import rx.RxReactiveStreams
 import rx.{Observable, Subscriber}
-import scala.concurrent.{Future, Promise}
 import play.api.libs.json._
-
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.util.{Failure, Success}
+
+import rx.functions.Func1
 
 /**
  * Created by Jason Martens <jason.martens@3drobotics.com> on 7/31/15.
@@ -418,6 +418,8 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
       }
   }
 
+  val concurrentDocumentsFetched = 512
+
   /**
    * Get the documents found from an Observable[AsyncViewRow]
     *
@@ -425,7 +427,9 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
    * @return A new Observable[RawJsonDocument]
    */
   def withDocuments(docObservable: Observable[AsyncViewRow]): Observable[RawJsonDocument] = {
-    docObservable.flatMap(_.document(classOf[RawJsonDocument]))
+    docObservable.flatMap(new Func1[AsyncViewRow, Observable[RawJsonDocument]] {
+      def call(x: AsyncViewRow): Observable[RawJsonDocument] = x.document(classOf[RawJsonDocument])
+    }, concurrentDocumentsFetched)
   }
 
 
