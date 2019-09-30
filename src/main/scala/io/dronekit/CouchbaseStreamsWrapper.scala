@@ -27,9 +27,8 @@ import com.couchbase.client.core.time.Delay
 import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
 import rx.RxReactiveStreams
-import rx.lang.scala.JavaConversions.{toJavaObservable, toScalaObservable}
-import rx.lang.scala.Observable
-import java.lang.Thread
+import rx.{Observable, Subscriber}
+import scala.concurrent.{Future, Promise}
 import play.api.libs.json._
 
 import scala.collection.JavaConverters._
@@ -120,7 +119,7 @@ object JsonSerializer {
 /**
   * A wrapper around a specific bucket which provides an Akka-Streams translation to the RxJava couchbase java API.
   *
-  * @param host Hostname of the couchbase server to connect to
+  * @param hosts Hostname of the couchbase server to connect to
   * @param bucketName Name of the bucket to connect to
   * @param password The password for the bucket
   * @param ec Execution Context for Futures and Streams
@@ -143,21 +142,36 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
   val log: Logger = Logger(LoggerFactory.getLogger(getClass))
 
   /**
-   * Convert an Observable with a single element into a Future
-    *
-    * @param observable The source to convert
+   * Convert an Observable with 0 or 1 element into an Option[Future]
+   *
+   * @param observable The source to convert
    * @tparam T The type of the resulting Future
    * @return The future
    */
-  private def observableToFuture[T](observable: Observable[T], empty: Option[T] = None): Future[T] = {
+  private def observableToOptionFuture[T](observable: Observable[T]): Future[Option[T]] = {
+    val p = Promise[Option[T]]
+    observable.subscribe(new Subscriber[T]() {
+      override def onCompleted(): Unit = p.trySuccess(None)
+      override def onError(e: Throwable): Unit = p.tryFailure(e)
+      override def onNext(t: T): Unit = p.trySuccess(Some(t))
+    })
+    p.future
+  }
+
+  /**
+    * Convert an Observable with a single element into a Future
+    *
+    * @param observable The source to convert
+    * @tparam T The type of the resulting Future
+    * @return The future
+    */
+  private def observableToFuture[T](observable: Observable[T]): Future[T] = {
     val p = Promise[T]
-    toScalaObservable(observable).subscribe(
-      value => p.trySuccess(value),
-      e => p.tryFailure(e),
-      () =>
-        if (empty.isDefined) p.trySuccess(empty.get)
-        else p.tryFailure(new RuntimeException("No content"))
-    )
+    observable.single.subscribe(new Subscriber[T]() {
+      override def onCompleted(): Unit = p.tryFailure(new NoSuchElementException())
+      override def onError(e: Throwable): Unit = p.tryFailure(e)
+      override def onNext(t: T): Unit = p.trySuccess(t)
+    })
     p.future
   }
 
@@ -168,8 +182,8 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
    * @tparam T The type parameter of the observable/source
    * @return An Akka-Streams Source
    */
-  private def observableToSource[T](observable: rx.lang.scala.Observable[T]): Source[T, Any] = {
-    Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(observable)))
+  private def observableToSource[T](observable: Observable[T]): Source[T, Any] = {
+    Source.fromPublisher(RxReactiveStreams.toPublisher(observable))
   }
 
 
@@ -183,14 +197,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
    */
   private def convertToEntity[T](docObservable: Observable[RawJsonDocument])
                                 (implicit format: JsonSerializer[T]): Future[DocumentResponse[T]] = {
-
-    val p = Promise[DocumentResponse[T]]
-    toScalaObservable(docObservable).subscribe(
-      doc => p.trySuccess(convertToEntity(doc)),
-      e => p.tryFailure(e),
-      () => p.tryFailure(new DocumentNotFound(""))
-    )
-    p.future
+    observableToOptionFuture(docObservable).map(_.getOrElse(throw new DocumentNotFound(""))).map(convertToEntity(_))
   }
 
   /**
@@ -268,29 +275,21 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
   }
 
   def binaryLookupByKey(key: String): Future[DocumentResponse[ByteString]] = {
-    val p = Promise[DocumentResponse[ByteString]]()
     val docObservable = bucket.async().get(key, classOf[BinaryDocument])
-    toScalaObservable(docObservable).subscribe(
-      doc => {
-        p.trySuccess(DocumentResponse(cas = doc.cas(), entity = ByteString(doc.content().nioBuffer())))
-        ReferenceCountUtil.release(doc.content())
-      },
-      e => p.tryFailure(e),
-      () => p.tryFailure(new DocumentNotFound(""))
-    )
-    p.future
+    observableToOptionFuture(docObservable).map { docOpt =>
+      val doc = docOpt.getOrElse(throw new DocumentNotFound(""))
+      val bytes = ByteString(doc.content.nioBuffer())
+      ReferenceCountUtil.release(doc.content)
+      DocumentResponse(cas = doc.cas(), entity = bytes)
+    }
   }
 
   def binaryInsertDocument(data: ByteString, key: String, expiry: Int = 0): Future[DocumentResponse[ByteString]] = {
-    val p = Promise[DocumentResponse[ByteString]]()
     val buffer = Unpooled.copiedBuffer(data.toArray[Byte])
     val doc = BinaryDocument.create(key, expiry, buffer)
-    val insertObservable = toScalaObservable(bucket.async().insert(doc))
-    insertObservable.subscribe(
-      doc => p.success(DocumentResponse(cas = doc.cas(), entity = ByteString())),
-      e => p.failure(e)
-    )
-    p.future
+    observableToFuture(bucket.async().insert(doc)).map { doc =>
+      DocumentResponse(cas = doc.cas(), entity = ByteString())
+    }
   }
 
   /**
@@ -300,14 +299,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
    * @return A Successful future if the document was found, otherwise a Failure
    */
   def removeByKey(key: String): Future[JsonDocument] = {
-    val p = Promise[JsonDocument]()
-    val removedObservable = bucket.async().remove(key)
-    toScalaObservable(removedObservable).subscribe(
-      doc => p.trySuccess(doc),
-      e => p.tryFailure(e),
-      () => p.tryFailure(new DocumentNotFound(""))
-    )
-    p.future
+    observableToOptionFuture(bucket.async().remove(key)).map(_.getOrElse(throw new DocumentNotFound("")))
   }
 
   /**
@@ -335,17 +327,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
   def indexQuerySingleElement(designDoc: String, viewDoc: String, key: String, forceIndex: Boolean=false):
   Future[Option[AsyncViewRow]] = {
     val staleState = if (forceIndex) Stale.FALSE else Stale.TRUE
-    val rowFuture = observableToFuture(
-      indexQuery(designDoc, viewDoc, List(key), staleState).head)
-
-    // Check if a row was returned, and return None if it was not found else return the row
-    val resultPromise = Promise[Option[AsyncViewRow]]()
-    rowFuture.onComplete {
-      case Success(row) => resultPromise.success(Some(row))
-      case Failure(ex: NoSuchElementException) => resultPromise.success(None)
-      case Failure(ex) => resultPromise.failure(ex)
-    }
-    resultPromise.future
+    observableToOptionFuture(indexQuery(designDoc, viewDoc, List(key), staleState).take(1))
   }
 
   /**
@@ -359,8 +341,6 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
    */
   def indexQuery(designDoc: String, viewDoc: String, keys: List[String] = List(), stale: Stale = Stale.FALSE,
                 limit: Int = Int.MaxValue, skip: Int = 0): Observable[AsyncViewRow] = {
-    // Couchbase needs a java.util.List
-    val keyList: java.util.List[String] = keys.asJava
     val query =
       if (keys.isEmpty)
         ViewQuery.from(designDoc, viewDoc)
@@ -372,11 +352,10 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
         ViewQuery.from(designDoc, viewDoc)
           .stale(stale)
           .inclusiveEnd(true)
-          .keys(JsonArray.from(keyList))
+          .keys(JsonArray.from(keys.asJava))
           .limit(limit)
           .skip(skip)
-    toScalaObservable(bucket.async().query(query))
-      .flatMap(queryResult => queryResult.rows())
+    bucket.async().query(query).flatMap(queryResult => queryResult.rows())
   }
 
   /**
@@ -412,8 +391,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
       query = query.endKey(JsonArray.from(endKey.get.asJava))
     }
 
-    toScalaObservable(bucket.async().query(query))
-      .flatMap(queryResult => queryResult.rows())
+    bucket.async().query(query).flatMap(queryResult => queryResult.rows())
   }
 
   def paginatedIndexQuery[T](designDoc: String, viewDoc: String, startKey: Seq[Any], endKey: Seq[Any],
@@ -430,14 +408,14 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
       .limit(limit)
       .skip(if (startDocId.isDefined) 1 else 0)
       .includeDocs(classOf[RawJsonDocument])
+
     observableToFuture(bucket.async().query(query))
       .map { queryResult =>
-        val rows = toScalaObservable(queryResult.rows())
-          .flatMap(row => row.document(classOf[RawJsonDocument]))
-          .map(rawDoc => convertToEntity[T](rawDoc))
+        val rows = observableToSource(withDocuments(queryResult.rows()))
+          .map(convertToEntity[T](_))
         ViewQueryResponse[T](
-          rows = observableToSource(rows),
-          errors = observableToFuture(queryResult.error(), Some(JsonObject.empty())),
+          rows = rows,
+          errors = observableToOptionFuture(queryResult.error()).map(_.getOrElse(JsonObject.empty())),
           debug = queryResult.debug()
         )
       }
@@ -449,7 +427,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
     * @param docObservable An Observable[AsyncViewRow] as the list of documents
    * @return A new Observable[RawJsonDocument]
    */
-  def withDocuments(docObservable: rx.lang.scala.Observable[AsyncViewRow]): Observable[RawJsonDocument] = {
+  def withDocuments(docObservable: Observable[AsyncViewRow]): Observable[RawJsonDocument] = {
     docObservable.flatMap(_.document(classOf[RawJsonDocument]))
   }
 
@@ -469,7 +447,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
                            (implicit format: JsonSerializer[T]): Source[DocumentResponse[T], Any] = {
     val query = indexQuery(designDoc, viewDoc, keys, stale, limit, skip)
     val docs = withDocuments(query)
-    Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(docs))).map(convertToEntity[T])
+    Source.fromPublisher(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
   }
 
   /**
@@ -488,7 +466,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
   Source[DocumentResponse[T], Any] = {
     val query = compoundIndexQuery(designDoc, viewDoc, keys, None, None, stale, limit, skip)
     val docs = withDocuments(query)
-    Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(docs))).map(convertToEntity[T])
+    Source.fromPublisher(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
   }
 
   /**
@@ -510,7 +488,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
   Source[DocumentResponse[T], Any] = {
     val query = compoundIndexQuery(designDoc, viewDoc, None, startKey, endKey, stale, limit, skip)
     val docs = withDocuments(query)
-    Source.fromPublisher(RxReactiveStreams.toPublisher(toJavaObservable(docs))).map(convertToEntity[T])
+    Source.fromPublisher(RxReactiveStreams.toPublisher(docs)).map(convertToEntity[T])
   }
 
   /**
@@ -528,17 +506,14 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
     */
   def n1qlQuery(q: Statement, params: N1qlParams = N1qlParams.build().adhoc(false)): Future[RawQueryResponse] = {
     val query = N1qlQuery.simple(q, params)
-    val resultObservable = bucket.async().query(query)
-    val observable = toScalaObservable(resultObservable)
-      .map{ queryResult =>
-        RawQueryResponse(
-          observableToSource[AsyncN1qlQueryRow](queryResult.rows()),
-          status = observableToFuture[String](queryResult.status()),
-          errors = observableToFuture[JsonObject](queryResult.errors(), Some(JsonObject.empty())),
-          info = observableToFuture[N1qlMetrics](queryResult.info())
-        )
-      }
-    observableToFuture[RawQueryResponse](observable)
+    observableToFuture(bucket.async().query(query)).map { queryResult =>
+      RawQueryResponse(
+        observableToSource[AsyncN1qlQueryRow](queryResult.rows()),
+        status = observableToFuture[String](queryResult.status()),
+        errors = observableToOptionFuture[JsonObject](queryResult.errors()).map(_.getOrElse(JsonObject.empty())),
+        info = observableToFuture[N1qlMetrics](queryResult.info())
+      )
+    }
   }
 
   /**
@@ -571,18 +546,19 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
       .limit(limit)
       .offset(offset)
     val q = N1qlQuery.simple(s, params)
-    val observable = toScalaObservable(bucket.async().query(q))
-      .map{ queryResult => QueryResponse[T](
+    observableToFuture(bucket.async().query(q)).map { queryResult =>
+      QueryResponse[T](
         rows = observableToSource[AsyncN1qlQueryRow](queryResult.rows())
           .map{ row =>
             val cas = row.value().getLong("cas")
             val entity = format.parse(row.value().getObject(bucketName).toString)
-            DocumentResponse[T](cas, entity)},
+            DocumentResponse[T](cas, entity)
+          },
         status = observableToFuture[String](queryResult.status()),
-        errors = observableToFuture(queryResult.errors()),
+        errors = observableToFuture[JsonObject](queryResult.errors()),
         info = observableToFuture[N1qlMetrics](queryResult.info())
-      )}
-    observableToFuture[QueryResponse[T]](observable)
+      )
+    }
   }
 
   /**
@@ -597,8 +573,8 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
         RawQueryResponse(
           observableToSource[AsyncN1qlQueryRow](queryResult.rows()),
           status = observableToFuture[String](queryResult.status()),
-          errors = observableToFuture[JsonObject](queryResult.errors(), Some(JsonObject.empty())),
-          info = observableToFuture[N1qlMetrics](queryResult.info())
+          errors = observableToOptionFuture[JsonObject](queryResult.errors()).map(_.getOrElse(JsonObject.empty())),
+          info = observableToFuture[N1qlMetrics](queryResult.info()),
         )
       }
   }
@@ -613,16 +589,18 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
     */
   def n1qlParameterizedQueryToEntity[T](query: ParameterizedN1qlQuery)
                                        (implicit format: JsonSerializer[T]): Future[QueryResponse[T]] = {
-    observableToFuture(bucket.async().query(query))
-      .map{ queryResult => QueryResponse[T](
+    observableToFuture(bucket.async().query(query)).map { queryResult =>
+      QueryResponse[T](
         rows = observableToSource[AsyncN1qlQueryRow](queryResult.rows())
-          .map{ row =>
+          .map { row =>
             val cas = row.value().getLong("cas")
             val entity = format.parse(row.value().getObject(bucketName).toString)
-            DocumentResponse[T](cas, entity)},
-        status = observableToFuture[String](queryResult.status()),
-        errors = observableToFuture(queryResult.errors()),
-        info = observableToFuture[N1qlMetrics](queryResult.info())
-      )}
+            DocumentResponse[T](cas, entity)
+          },
+          status = observableToFuture[String](queryResult.status()),
+          errors = observableToOptionFuture[JsonObject](queryResult.errors()).map(_.getOrElse(JsonObject.empty())),
+          info = observableToFuture[N1qlMetrics](queryResult.info())
+      )
+    }
   }
 }

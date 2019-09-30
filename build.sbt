@@ -32,7 +32,6 @@ libraryDependencies ++= {
     "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0",
     "com.couchbase.client" % "java-client" % "2.5.8",
     "io.reactivex" % "rxjava-reactive-streams" % "1.2.1",
-    "io.reactivex" %% "rxscala" % "0.26.5",
     "org.scalatest" %% "scalatest" % "3.0.1" % Test
   )
 }
