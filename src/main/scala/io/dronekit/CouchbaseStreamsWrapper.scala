@@ -92,8 +92,6 @@ case class RawQueryResponse(rows: Source[AsyncN1qlQueryRow, Any],
                          errors: Future[JsonObject],
                          info: Future[N1qlMetrics])
 
-case class UpdateObject[T](entity: T, cas: Long, key: String)
-
 class DocumentNotFound(message: String) extends RuntimeException(message)
 class DeserializationError(couchbaseKey: String, exception: JsResultException) extends RuntimeException(s"Deserialization error with couchbase key '${couchbaseKey}': ${exception}")
 
@@ -294,45 +292,6 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
     )
     p.future
   }
-
-  /**
-   * Retrieve a list of keys in Couchbase using the batch async system
-    *
-    * @param keys The list of keys to retrieve
-   * @return A Source of RawJsonDocuments
-   */
-  def batchLookupByKey[T](keys: List[String])
-                         (implicit format: JsonSerializer[T]):
-  Source[DocumentResponse[T], Any] = {
-    val docObservable = Observable.from(keys)
-      .flatMap(key => bucket.async().get(key, classOf[RawJsonDocument]))
-    observableToSource(docObservable).map(json => convertToEntity[T](json))
-  }
-
-  /**
-   * Does a batch update of keys -> each update
-   * Throws a DocumentNotFound exception if all of the keys for the batch updates cannot be found
-   * @param entities Seqence of UpdateObject to update
-   * @return a Future source of entities from the batch update request
-   */
-  def batchUpdate[T](entities: Seq[UpdateObject[T]])(implicit format: JsonSerializer[T]): Future[Source[DocumentResponse[T], Any]] = {
-    val lookupSource = batchLookupByKey[T](entities.map{e => e.key}.toList)
-    lookupSource.grouped(entities.length).runWith(Sink.head).map{res =>
-      val Expected = entities.length
-      res.length match {
-        case Expected =>
-          val observableSeq = entities.map{e =>
-            val replacement = RawJsonDocument.create(e.key, format.serialize(e.entity), e.cas)
-            bucket.async().replace(replacement)
-          }
-
-          val observableCombined = observableSeq.reduce((ob1, ob2) => ob1.mergeWith(ob2))
-          observableToSource(observableCombined).map(json => convertToEntity[T](json))
-        case _ => throw new DocumentNotFound(s"Could not perform a batch update due to missing keys")
-      }
-    }
-  }
-
 
   /**
    * Remove a document from the database

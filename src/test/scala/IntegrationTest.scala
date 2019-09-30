@@ -3,10 +3,10 @@ import java.time.{Duration, Instant}
 
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.Sink
+import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.testkit.scaladsl.TestSink
 import akka.util.ByteString
-import com.couchbase.client.java.{PersistTo, CouchbaseCluster}
+import com.couchbase.client.java.{CouchbaseCluster, PersistTo}
 import com.couchbase.client.java.bucket.{BucketFlusher, BucketType}
 import com.couchbase.client.java.cluster.DefaultBucketSettings
 import com.couchbase.client.java.error.{CASMismatchException, DocumentDoesNotExistException}
@@ -18,13 +18,13 @@ import com.couchbase.client.java.query.dsl.{Expression, Sort}
 import com.couchbase.client.java.query.{Index, N1qlParams, N1qlQuery, Statement}
 import com.couchbase.client.java.view.{DefaultView, DesignDocument, Stale}
 import com.typesafe.config.ConfigFactory
-import io.dronekit.{UpdateObject, CouchbaseStreamsWrapper, DocumentNotFound}
+
+import io.dronekit.{CouchbaseStreamsWrapper, DocumentNotFound}
 import org.scalatest._
 import play.api.libs.json._
-
 import scala.collection.JavaConverters._
 import scala.concurrent.duration.{Duration => _, _}
-import scala.concurrent.{Future, Await, ExecutionContext}
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.language.postfixOps
 import scala.languageFeature.postfixOps
 import scala.util.Random
@@ -263,11 +263,13 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
     val f2 = couchbase.insertDocument[TestEntity](personTwo, personTwo.id)
     Await.ready(f1 zip f2, 10 seconds)
 
-    val source = couchbase.batchLookupByKey[TestEntity](List(personOne.id, personTwo.id))
-    val results = Await.result(source.grouped(2).runWith(Sink.head), 10 seconds)
+    val source = Source(List(personOne.id, personTwo.id)).mapAsync(10)(couchbase.lookupByKey[TestEntity](_))
+    val results = Await.result(source.runWith(Sink.seq), 10 seconds)
     results.find(_.entity.id == personOne.id).get.entity shouldBe personOne
     results.find(_.entity.id == personTwo.id).get.entity shouldBe personTwo
   }
+
+  case class UpdateObject[T](entity: T, cas: Long, key: String)
 
   "Should be able to do a batch update by keys" in {
     val personOne = TestEntity(name = "Grover", age = 4, sex = Some("male"))
@@ -279,11 +281,10 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
     insertResults.map{ case (p1, p2) =>
       val updateOne = personOne.copy(age = 5)
       val updateTwo = otherPersonTwo.copy(location="Oakland")
-      val updateSeq: Seq[UpdateObject[TestTrait]] = Seq(UpdateObject[TestTrait](key = personOne.id, cas = p1.cas, entity = updateOne), UpdateObject[TestTrait](key = otherPersonTwo.id, cas = p2.cas, entity = updateTwo))
+      val updateSeq: List[UpdateObject[TestTrait]] = List(UpdateObject[TestTrait](key = personOne.id, cas = p1.cas, entity = updateOne), UpdateObject[TestTrait](key = otherPersonTwo.id, cas = p2.cas, entity = updateTwo))
 
-      val sourceFut = couchbase.batchUpdate[TestTrait](updateSeq)
-      val source = Await.result(sourceFut, 10 seconds)
-      val results = Await.result(source.grouped(2).runWith(Sink.head), 10 seconds)
+      val source = Source(updateSeq).mapAsync(10){u => couchbase.replaceDocument(u.entity, u.key, u.cas)}
+      val results = Await.result(source.runWith(Sink.seq), 10 seconds)
       results.find{r => r.entity.doc == "TestEntity"}.get.entity.asInstanceOf[TestEntity] shouldBe updateOne
       results.find{r => r.entity.doc == "OtherTestEntity"}.get.entity.asInstanceOf[OtherTestEntity] shouldBe updateTwo
     }
@@ -307,16 +308,15 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
     val casRes = Await.result(aggFut, 10 seconds)
 
     val updateOne = personOne.copy(age = 5)
-    val updateSeq: Seq[UpdateObject[TestTrait]] = Seq(
+    val updateSeq: List[UpdateObject[TestTrait]] = List(
       UpdateObject[TestTrait](key = personOne.id, cas = casRes._1, entity = updateOne),
       UpdateObject[TestTrait](key = "some-bad-key", cas = 123, entity = personTwo),
       UpdateObject[TestTrait](key = personThree.id, cas = casRes._2, entity = personThree.copy(age=6)),
       UpdateObject[TestTrait](key = personFour.id, cas = casRes._3, entity = personFour.copy(age=7)))
 
-    val sourceFut = couchbase.batchUpdate[TestTrait](updateSeq)
-    intercept[DocumentNotFound] {
-      val source = Await.result(sourceFut, 10 seconds)
-      Await.result(source.grouped(4).runWith(Sink.head), 10 seconds)
+    val source = Source(updateSeq).mapAsync(10){u => couchbase.replaceDocument(u.entity, u.key, u.cas)}
+    intercept[DocumentDoesNotExistException] {
+      Await.result(source.runWith(Sink.seq), 10 seconds)
     }
   }
 
