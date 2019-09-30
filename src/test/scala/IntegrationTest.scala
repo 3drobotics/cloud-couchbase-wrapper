@@ -90,7 +90,8 @@ object TestTrait {
  */
 class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
   val testBucketName = "cloud-couchbase-wrapper-test"
-  val testBucketPassword = "password"
+  val testUserName = "Administrator"
+  val testPassword = "password"
 
   implicit val system: ActorSystem = ActorSystem()
   implicit val materializer: ActorMaterializer = ActorMaterializer()
@@ -98,9 +99,10 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
 
   val couchbaseConfig = ConfigFactory.load().getConfig("couchbase")
   val couchbase = new CouchbaseStreamsWrapper(
-    couchbaseConfig.getString("hostname"),
+    List(couchbaseConfig.getString("hostname")),
     testBucketName,
-    testBucketPassword,
+    testUserName,
+    testPassword,
   )
 
   couchbase.bucket.bucketManager().flush();
