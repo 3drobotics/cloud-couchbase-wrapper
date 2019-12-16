@@ -1,3 +1,4 @@
+// © 2019 3D Robotics. License: ISC
 import java.util.UUID
 import java.time.{Duration, Instant}
 
