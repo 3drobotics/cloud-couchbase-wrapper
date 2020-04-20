@@ -24,7 +24,7 @@ publishTo := {
 }
 
 libraryDependencies ++= {
-  val akkaV = "2.5.25"
+  val akkaV = "2.6.4"
   Seq(
     "com.typesafe.akka" %% "akka-stream" % akkaV,
     "com.typesafe.akka" %% "akka-stream-testkit" % akkaV % Test,

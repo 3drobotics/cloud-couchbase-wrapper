@@ -3,7 +3,6 @@ import java.util.UUID
 import java.time.{Duration, Instant}
 
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.testkit.scaladsl.TestSink
 import akka.util.ByteString
@@ -95,7 +94,6 @@ class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
   val testPassword = "password"
 
   implicit val system: ActorSystem = ActorSystem()
-  implicit val materializer: ActorMaterializer = ActorMaterializer()
   implicit val context: ExecutionContext = system.dispatcher
 
   val couchbaseConfig = ConfigFactory.load().getConfig("couchbase")

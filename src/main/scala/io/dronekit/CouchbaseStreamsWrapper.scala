@@ -9,7 +9,6 @@ package io.dronekit
 import java.util.NoSuchElementException
 import java.util.concurrent.TimeUnit
 
-import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Source
 import akka.util.ByteString
 import com.couchbase.client.deps.io.netty.buffer._
@@ -122,15 +121,14 @@ object JsonSerializer {
   * @param bucketName Name of the bucket to connect to
   * @param password The password for the bucket
   * @param ec Execution Context for Futures and Streams
-  * @param mat Materializer for Akka-Streams
   */
 
 class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName: String, password: String)
-                    (implicit ec: ExecutionContext, mat: ActorMaterializer)
+                    (implicit ec: ExecutionContext)
 {
 
   // legacy Couchbase setup method - assumes the bucket name and user name are identical
-  def this(host: String, bucketName: String, password: String)(implicit ec: ExecutionContext, mat: ActorMaterializer) {
+  def this(host: String, bucketName: String, password: String)(implicit ec: ExecutionContext) {
     this(List(host), bucketName, bucketName, password)
   }
 
