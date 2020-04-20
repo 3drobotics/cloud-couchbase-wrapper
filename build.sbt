@@ -2,26 +2,14 @@ name := "couchbasestreamswrapper"
 
 organization := "io.dronekit"
 
-version := "3.0.0"
+version := "3.1.0"
 
 scalaVersion := "2.13.1"
 crossScalaVersions := Seq("2.12.10", "2.13.1")
 
 scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8", "-feature", "-language:postfixOps")
 
-resolvers += "Artifactory" at "https://dronekit.artifactoryonline.com/dronekit/libs-snapshot-local/"
-
-credentials += Credentials(Path.userHome / ".sbt" / ".credentials")
-
 isSnapshot := true
-
-publishTo := {
-  val artifactory = "https://dronekit.artifactoryonline.com/"
-  if (isSnapshot.value)
-    Some("snapshots" at artifactory + s"dronekit/libs-snapshot-local;build.timestamp=${new java.util.Date().getTime}")
-  else
-    Some("snapshots" at artifactory + "dronekit/libs-release-local")
-}
 
 libraryDependencies ++= {
   val akkaV = "2.6.4"
