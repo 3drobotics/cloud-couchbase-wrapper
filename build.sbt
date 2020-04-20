@@ -28,7 +28,7 @@ libraryDependencies ++= {
   Seq(
     "com.typesafe.akka" %% "akka-stream" % akkaV,
     "com.typesafe.akka" %% "akka-stream-testkit" % akkaV % Test,
-    "com.typesafe.play" %% "play-json" % "2.7.4",
+    "com.typesafe.play" %% "play-json" % "2.8.1",
     "com.couchbase.client" % "java-client" % "2.7.14",
     "io.reactivex" % "rxjava-reactive-streams" % "1.2.1",
     "org.scalatest" %% "scalatest" % "3.0.8" % Test
