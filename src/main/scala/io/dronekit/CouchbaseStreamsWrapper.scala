@@ -28,7 +28,7 @@ import com.couchbase.client.core.time.Delay
 import rx.RxReactiveStreams
 import rx.{Observable, Subscriber}
 import play.api.libs.json._
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
 import rx.functions.Func1
@@ -128,7 +128,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
 {
 
   // legacy Couchbase setup method - assumes the bucket name and user name are identical
-  def this(host: String, bucketName: String, password: String)(implicit ec: ExecutionContext) {
+  def this(host: String, bucketName: String, password: String)(implicit ec: ExecutionContext) = {
     this(List(host), bucketName, bucketName, password)
   }
 
@@ -145,7 +145,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
    * @return The future
    */
   private def observableToOptionFuture[T](observable: Observable[T]): Future[Option[T]] = {
-    val p = Promise[Option[T]]
+    val p = Promise[Option[T]]()
     observable.subscribe(new Subscriber[T]() {
       override def onCompleted(): Unit = p.trySuccess(None)
       override def onError(e: Throwable): Unit = p.tryFailure(e)
@@ -162,7 +162,7 @@ class CouchbaseStreamsWrapper(hosts: List[String], bucketName: String, userName:
     * @return The future
     */
   private def observableToFuture[T](observable: Observable[T]): Future[T] = {
-    val p = Promise[T]
+    val p = Promise[T]()
     observable.single.subscribe(new Subscriber[T]() {
       override def onCompleted(): Unit = p.tryFailure(new NoSuchElementException())
       override def onError(e: Throwable): Unit = p.tryFailure(e)

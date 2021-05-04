@@ -22,7 +22,7 @@ import com.typesafe.config.ConfigFactory
 import io.dronekit.{CouchbaseStreamsWrapper, DocumentNotFound}
 import org.scalatest._
 import play.api.libs.json._
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.concurrent.duration.{Duration => _, _}
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.language.postfixOps
