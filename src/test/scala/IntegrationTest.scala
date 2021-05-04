@@ -21,6 +21,8 @@ import com.typesafe.config.ConfigFactory
 
 import io.dronekit.{CouchbaseStreamsWrapper, DocumentNotFound}
 import org.scalatest._
+import org.scalatest.wordspec._
+import org.scalatest.matchers.should.Matchers
 import play.api.libs.json._
 import scala.jdk.CollectionConverters._
 import scala.concurrent.duration.{Duration => _, _}
@@ -88,7 +90,7 @@ object TestTrait {
  *
  * Integration test class for CouchbaseStreamsWrapper, requires a running Couchbase instance
  */
-class IntegrationTest extends WordSpec with Matchers with BeforeAndAfterAll {
+class IntegrationTest extends AnyWordSpec with Matchers with BeforeAndAfterAll {
   val testBucketName = "cloud-couchbase-wrapper-test"
   val testUserName = "Administrator"
   val testPassword = "password"
